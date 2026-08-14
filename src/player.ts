@@ -1,4 +1,5 @@
-import { PLANE_LENGTH } from './config';
+import { PLANE_LENGTH, PLAYER_RADIUS } from './config';
+import { slideMove } from './world/collision';
 import type { GameMap } from './world/map';
 
 /**
@@ -88,24 +89,30 @@ export class Player {
     this.setDirection(this.dirX * cos - this.dirY * sin, this.dirX * sin + this.dirY * cos);
   }
 
-  /**
-   * Move by an offset in world units.
-   *
-   * There is no collision here yet — you can walk through walls, and through the outer
-   * wall into the void. That is deliberate: Stage 8 adds collision, and being able to fly
-   * around freely first is genuinely useful for inspecting the geometry from angles the
-   * level would not otherwise let you reach.
-   */
+  /** Move by an offset in world units, ignoring geometry entirely. */
   moveBy(dx: number, dy: number): void {
     this.x += dx;
     this.y += dy;
   }
 
-  /** Move along the facing and strafe axes at once. `forward`/`strafe` are in world units. */
-  move(forward: number, strafe: number): void {
-    this.moveBy(
-      this.dirX * forward + -this.dirY * strafe,
-      this.dirY * forward + this.dirX * strafe,
-    );
+  /**
+   * Move along the facing and strafe axes at once. `forward`/`strafe` are in world units.
+   *
+   * Converting the two axes into a world offset is the same rotation as everywhere else:
+   * forward follows `dir`, and strafe follows its right-hand perpendicular `(-dirY, dirX)`
+   * — the same vector the camera plane is built from.
+   */
+  move(forward: number, strafe: number, map?: GameMap): void {
+    const dx = this.dirX * forward + -this.dirY * strafe;
+    const dy = this.dirY * forward + this.dirX * strafe;
+
+    // No map means no collision: still how the top-down debug view and noclip get around,
+    // and useful for inspecting geometry from outside the level.
+    if (!map) {
+      this.moveBy(dx, dy);
+      return;
+    }
+
+    slideMove(map, this, dx, dy, PLAYER_RADIUS);
   }
 }

@@ -71,3 +71,13 @@ export const TEX_SIZE = 64;
 
 /** Mask for wrapping a texture coordinate. Valid only because TEX_SIZE is a power of two. */
 export const TEX_MASK = TEX_SIZE - 1;
+
+/**
+ * Collision radius of the player, in world units.
+ *
+ * Comfortably under half a cell, which is what lets you through a one-unit doorway without
+ * having to line up on it — anything at or above 0.5 makes doorways feel like threading a
+ * needle. Large enough, though, that you cannot press your face into a corner and see
+ * through the seam where two walls meet.
+ */
+export const PLAYER_RADIUS = 0.28;

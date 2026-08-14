@@ -75,6 +75,13 @@ const spans = createWallSpans(VIEW_W);
 type ViewMode = 'first-person' | 'top-down';
 let viewMode: ViewMode = 'first-person';
 
+/**
+ * Walk through walls. Kept as a switch rather than dropped, because being able to leave the
+ * level and look back at it is genuinely useful for inspecting geometry — and it is the
+ * quickest way to confirm that a rendering oddity is not a collision problem.
+ */
+let noclip = false;
+
 let schemeName: SchemeName = 'modern';
 mouse.enabled = SCHEMES[schemeName].usesMouseLook;
 
@@ -138,6 +145,7 @@ startLoop({
     if (keys.wasPressed('KeyL')) render.lighting = !render.lighting;
     if (keys.wasPressed('KeyT')) render.textured = !render.textured;
     if (keys.wasPressed('KeyC')) render.castFloors = !render.castFloors;
+    if (keys.wasPressed('KeyN')) noclip = !noclip;
     if (keys.wasPressed('KeyM')) {
       viewMode = viewMode === 'first-person' ? 'top-down' : 'first-person';
     }
@@ -161,7 +169,7 @@ startLoop({
     }
 
     const speed = MOVE_SPEED * (intent.run ? RUN_MULTIPLIER : 1) * dt;
-    player.move(forward * speed, strafe * speed);
+    player.move(forward * speed, strafe * speed, noclip ? undefined : map);
 
     keys.endTick();
   },
@@ -207,6 +215,7 @@ startLoop({
       `light ${render.lighting ? 'distance shading on' : 'OFF — flat'}   (L)\n` +
       `tex   ${render.textured ? 'textured' : 'OFF — flat colours'}   (T)\n` +
       `floor ${render.castFloors ? 'cast + textured' : 'OFF — flat bands'}   (C)\n` +
+      `clip  ${noclip ? 'NOCLIP — walk through walls' : 'collision on'}   (N)\n` +
       `\n` +
       `scheme: ${scheme.name}  (\` to switch)\n` +
       `${scheme.help}` +
