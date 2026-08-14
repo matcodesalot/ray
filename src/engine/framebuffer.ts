@@ -88,6 +88,45 @@ export class Framebuffer {
     }
   }
 
+  /**
+   * Draw a line with Bresenham's algorithm. Debug drawing only — not used in the hot path.
+   *
+   * Bresenham walks the long axis one pixel at a time and keeps a running error term to
+   * decide when to step the short axis, so the whole thing runs on integer addition with
+   * no division and no floating point. Pixels outside the buffer are skipped rather than
+   * the line being clipped up front, which is slower but much harder to get wrong.
+   */
+  drawLine(x0: number, y0: number, x1: number, y1: number, color: number): void {
+    let x = Math.round(x0);
+    let y = Math.round(y0);
+    const endX = Math.round(x1);
+    const endY = Math.round(y1);
+
+    const dx = Math.abs(endX - x);
+    const dy = -Math.abs(endY - y);
+    const stepX = x < endX ? 1 : -1;
+    const stepY = y < endY ? 1 : -1;
+    let error = dx + dy;
+
+    for (;;) {
+      if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
+        this.pixels[y * this.width + x] = color;
+      }
+      if (x === endX && y === endY) break;
+
+      // Doubling avoids a division when comparing the error against half a step.
+      const doubled = 2 * error;
+      if (doubled >= dy) {
+        error += dy;
+        x += stepX;
+      }
+      if (doubled <= dx) {
+        error += dx;
+        y += stepY;
+      }
+    }
+  }
+
   /** Blit the buffer to a visible context, scaled into the given destination rectangle. */
   present(
     dest: CanvasRenderingContext2D,

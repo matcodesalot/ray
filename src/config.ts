@@ -33,3 +33,29 @@ export const TICK_HZ = 60;
  * spiral into unresponsiveness.
  */
 export const MAX_FRAME_TIME = 0.25;
+
+/**
+ * Half-width of the camera plane, in world units, for a direction vector of length 1.
+ *
+ * This is how the field of view is expressed. The camera plane is a line segment held
+ * perpendicular to the player's facing, one unit in front of them; rays are shot at
+ * points spread across it. Longer plane, wider fan of rays, wider FOV:
+ *
+ *     FOV = 2 * atan(PLANE_LENGTH)
+ *
+ * 0.66 gives about 66 degrees, close to the original's. Push it past ~1.0 and you get
+ * the fisheye stretching you would expect from a real wide-angle lens.
+ */
+export const PLANE_LENGTH = 0.66;
+
+/** Walking speed, in tiles per second. */
+export const MOVE_SPEED = 3.0;
+
+/** Multiplier applied to movement while the run key is held. */
+export const RUN_MULTIPLIER = 1.8;
+
+/** Keyboard turning speed, in radians per second. */
+export const TURN_SPEED = 2.4;
+
+/** Mouse look, in radians per unit of pointer movement. */
+export const MOUSE_SENSITIVITY = 0.0022;
