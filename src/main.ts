@@ -15,6 +15,7 @@ import { Player } from './player';
 import { drawDepthProfile } from './render/depthprofile';
 import { drawMap, drawPlayer, drawRays, layoutMinimap, type Rect } from './render/minimap';
 import { RayFan } from './render/raycast';
+import { drawWalls } from './render/walls';
 import { LEVEL_1 } from './world/levels/level1';
 
 /** Look up a required element, failing loudly rather than propagating a null. */
@@ -52,8 +53,21 @@ const PROFILE_BOUNDS: Rect = { x: 0, y: VIEW_H - PROFILE_H, w: VIEW_W, h: PROFIL
 const RAY_STRIDES = [8, 4, 2, 1, 32, 16];
 let strideIndex = 0;
 
-/** Whether the profile plots euclidean distance instead of perpendicular. See Stage 3 doc. */
+/**
+ * Whether to use euclidean instead of perpendicular distance.
+ *
+ * A teaching switch, not an option. In the first-person view it bows the walls; on the
+ * top-down profile it lifts the plateau at both edges. Same cause, two views of it.
+ */
 let showEuclidean = false;
+
+/**
+ * The top-down view from Stages 2 and 3 is kept as a debug view rather than deleted. It
+ * is the only place you can see where the rays actually go, and it stays useful for every
+ * stage after this one — doors and sprites are both much easier to debug from above.
+ */
+type ViewMode = 'first-person' | 'top-down';
+let viewMode: ViewMode = 'first-person';
 
 let schemeName: SchemeName = 'modern';
 mouse.enabled = SCHEMES[schemeName].usesMouseLook;
@@ -115,6 +129,9 @@ startLoop({
     if (keys.wasPressed('Backquote')) setScheme(otherScheme(schemeName));
     if (keys.wasPressed('KeyF')) showEuclidean = !showEuclidean;
     if (keys.wasPressed('KeyR')) strideIndex = (strideIndex + 1) % RAY_STRIDES.length;
+    if (keys.wasPressed('KeyM')) {
+      viewMode = viewMode === 'first-person' ? 'top-down' : 'first-person';
+    }
 
     const intent = SCHEMES[schemeName].poll(keys, mouse);
 
@@ -143,11 +160,15 @@ startLoop({
   render() {
     fan.cast(map, player);
 
-    const layout = layoutMinimap(map, MAP_BOUNDS);
-    drawMap(framebuffer, map, layout);
-    drawRays(framebuffer, player, fan.hits, layout, RAY_STRIDES[strideIndex]!);
-    drawPlayer(framebuffer, player, layout);
-    drawDepthProfile(framebuffer, fan.hits, PROFILE_BOUNDS, showEuclidean);
+    if (viewMode === 'first-person') {
+      drawWalls(framebuffer, fan.hits, showEuclidean);
+    } else {
+      const layout = layoutMinimap(map, MAP_BOUNDS);
+      drawMap(framebuffer, map, layout);
+      drawRays(framebuffer, player, fan.hits, layout, RAY_STRIDES[strideIndex]!);
+      drawPlayer(framebuffer, player, layout);
+      drawDepthProfile(framebuffer, fan.hits, PROFILE_BOUNDS, showEuclidean);
+    }
 
     if (needsClear) {
       // Paint the letterbox bars. Only after a resize: the image covers the viewport
@@ -168,7 +189,8 @@ startLoop({
       `${fps.value.toFixed(0)} fps\n` +
       `pos ${player.x.toFixed(2)}, ${player.y.toFixed(2)}   heading ${heading.toFixed(0)}°\n` +
       `\n` +
-      `rays  every ${RAY_STRIDES[strideIndex]} column(s)   (R)\n` +
+      `view  ${viewMode}   (M)\n` +
+      (viewMode === 'top-down' ? `rays  every ${RAY_STRIDES[strideIndex]} column(s)   (R)\n` : '') +
       `depth ${showEuclidean ? 'EUCLIDEAN — fisheye' : 'perpendicular — correct'}   (F)\n` +
       `\n` +
       `scheme: ${scheme.name}  (\` to switch)\n` +
