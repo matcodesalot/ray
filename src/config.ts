@@ -59,3 +59,15 @@ export const TURN_SPEED = 2.4;
 
 /** Mouse look, in radians per unit of pointer movement. */
 export const MOUSE_SENSITIVITY = 0.0022;
+
+/**
+ * Texture edge length, in texels. Must be a power of two.
+ *
+ * 64 is what the original used, and the power of two is not nostalgia: it lets the
+ * innermost loop wrap a texture coordinate with `& (TEX_SIZE - 1)` instead of a modulo or
+ * a clamp, which matters when that line runs tens of thousands of times a frame.
+ */
+export const TEX_SIZE = 64;
+
+/** Mask for wrapping a texture coordinate. Valid only because TEX_SIZE is a power of two. */
+export const TEX_MASK = TEX_SIZE - 1;

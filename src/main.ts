@@ -72,6 +72,9 @@ let viewMode: ViewMode = 'first-person';
 /** Distance shading. Off is worth seeing — the depth cue vanishes completely. */
 let lighting = true;
 
+/** Textured walls. Off falls back to the Stage 5 flat colours, for comparison. */
+let textured = true;
+
 let schemeName: SchemeName = 'modern';
 mouse.enabled = SCHEMES[schemeName].usesMouseLook;
 
@@ -133,6 +136,7 @@ startLoop({
     if (keys.wasPressed('KeyF')) showEuclidean = !showEuclidean;
     if (keys.wasPressed('KeyR')) strideIndex = (strideIndex + 1) % RAY_STRIDES.length;
     if (keys.wasPressed('KeyL')) lighting = !lighting;
+    if (keys.wasPressed('KeyT')) textured = !textured;
     if (keys.wasPressed('KeyM')) {
       viewMode = viewMode === 'first-person' ? 'top-down' : 'first-person';
     }
@@ -165,7 +169,7 @@ startLoop({
     fan.cast(map, player);
 
     if (viewMode === 'first-person') {
-      drawWalls(framebuffer, fan.hits, showEuclidean, lighting);
+      drawWalls(framebuffer, fan.hits, showEuclidean, lighting, textured);
     } else {
       const layout = layoutMinimap(map, MAP_BOUNDS);
       drawMap(framebuffer, map, layout);
@@ -197,6 +201,7 @@ startLoop({
       (viewMode === 'top-down' ? `rays  every ${RAY_STRIDES[strideIndex]} column(s)   (R)\n` : '') +
       `depth ${showEuclidean ? 'EUCLIDEAN — fisheye' : 'perpendicular — correct'}   (F)\n` +
       `light ${lighting ? 'distance shading on' : 'OFF — flat'}   (L)\n` +
+      `tex   ${textured ? 'textured' : 'OFF — flat colours'}   (T)\n` +
       `\n` +
       `scheme: ${scheme.name}  (\` to switch)\n` +
       `${scheme.help}` +

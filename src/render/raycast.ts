@@ -38,10 +38,32 @@ export interface RayHit {
   /** World coordinates of the hit point, for drawing rays on the top-down view. */
   hitX: number;
   hitY: number;
+
+  /**
+   * Where along the wall face the ray struck, from 0 at one edge to 1 at the other.
+   *
+   * This is the texture coordinate. It is exact — a consequence of the DDA landing
+   * precisely on the face rather than somewhere near it — and it is why a sampling
+   * approach could never have produced a stable texture.
+   *
+   * Already oriented so that it always increases the same way around a cell, so opposite
+   * faces do not come out mirrored. See the flip in `castRay`.
+   */
+  wallX: number;
 }
 
 export function createRayHit(): RayHit {
-  return { perpDist: 0, euclidDist: 0, mapX: 0, mapY: 0, tile: 0, side: 0, hitX: 0, hitY: 0 };
+  return {
+    perpDist: 0,
+    euclidDist: 0,
+    mapX: 0,
+    mapY: 0,
+    tile: 0,
+    side: 0,
+    hitX: 0,
+    hitY: 0,
+    wallX: 0,
+  };
 }
 
 /**
@@ -170,6 +192,23 @@ export function castRay(
   out.mapX = mapX;
   out.mapY = mapY;
   out.side = side;
+
+  /**
+   * Where along the face we landed.
+   *
+   * An x-side face runs along y, so its texture coordinate is the fractional part of the
+   * hit's y — and vice versa. No extra work: the DDA already computed the exact hit point.
+   *
+   * The flip matters. Left to itself the coordinate runs in whichever direction the world
+   * axis happens to point, so the two faces on opposite sides of a block come out mirrored
+   * from each other. Harmless on a symmetric brick pattern, glaring on anything with
+   * writing or a recognisable motif — and it makes adjacent cells disagree at their seam.
+   * Reversing the coordinate on the two faces the ray meets from behind lines them all up.
+   */
+  let wallX = side === 0 ? out.hitY : out.hitX;
+  wallX -= Math.floor(wallX);
+  if ((side === 0 && rayDirX > 0) || (side === 1 && rayDirY < 0)) wallX = 1 - wallX;
+  out.wallX = wallX;
 
   return out;
 }
