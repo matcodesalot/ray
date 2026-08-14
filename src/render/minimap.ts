@@ -3,6 +3,7 @@ import type { Framebuffer } from '../engine/framebuffer';
 import type { Player } from '../player';
 import type { GameMap } from '../world/map';
 import { Tile } from '../world/tiles';
+import type { RayHit } from './raycast';
 
 /**
  * Top-down view of the level.
@@ -21,6 +22,8 @@ const COLOR_GRID = rgb(44, 47, 58);
 const COLOR_PLAYER = rgb(255, 214, 64);
 const COLOR_DIR = rgb(255, 255, 255);
 const COLOR_PLANE = rgb(96, 200, 255);
+const COLOR_RAY_X = rgb(120, 90, 40);
+const COLOR_RAY_Y = rgb(150, 115, 55);
 
 const TILE_COLORS: Readonly<Record<number, number>> = {
   [Tile.Wall1]: rgb(150, 60, 55),
@@ -44,21 +47,25 @@ export interface MinimapLayout {
   originY: number;
 }
 
-/** Fit the whole map inside a rectangle of the framebuffer, centred, preserving squareness. */
-export function layoutMinimap(
-  fb: Framebuffer,
-  map: GameMap,
-  padding = 6,
-): MinimapLayout {
+/** A rectangle of the framebuffer, in pixels. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Fit the whole map inside a rectangle, centred, keeping cells square. */
+export function layoutMinimap(map: GameMap, bounds: Rect, padding = 4): MinimapLayout {
   const scale = Math.min(
-    (fb.width - padding * 2) / map.width,
-    (fb.height - padding * 2) / map.height,
+    (bounds.w - padding * 2) / map.width,
+    (bounds.h - padding * 2) / map.height,
   );
 
   return {
     scale,
-    originX: (fb.width - map.width * scale) / 2,
-    originY: (fb.height - map.height * scale) / 2,
+    originX: bounds.x + (bounds.w - map.width * scale) / 2,
+    originY: bounds.y + (bounds.h - map.height * scale) / 2,
   };
 }
 
@@ -103,6 +110,35 @@ export function drawMap(fb: Framebuffer, map: GameMap, layout: MinimapLayout): v
       const sy = Math.round(toScreenY(layout, y));
       fb.drawLine(Math.round(layout.originX), sy, Math.round(toScreenX(layout, map.width)), sy, COLOR_GRID);
     }
+  }
+}
+
+/**
+ * Draw the ray fan.
+ *
+ * `stride` skips columns: all 320 rays drawn at once merge into a solid wedge that tells
+ * you nothing, whereas every 8th ray reads clearly as a fan of separate lines. Press R to
+ * cycle it and watch the fan fill in.
+ *
+ * This is the picture worth staring at. Each line ends exactly on a wall face — never
+ * short of one, never inside a wall. Walk up to a pillar and watch the rays that pass to
+ * either side of it shoot away into the distance while the ones that strike it stop dead.
+ */
+export function drawRays(
+  fb: Framebuffer,
+  player: Player,
+  hits: readonly RayHit[],
+  layout: MinimapLayout,
+  stride = 8,
+): void {
+  const px = toScreenX(layout, player.x);
+  const py = toScreenY(layout, player.y);
+
+  for (let i = 0; i < hits.length; i += stride) {
+    const hit = hits[i]!;
+    // Colour by which face was struck, so the alternation along a wall is visible.
+    const color = hit.side === 0 ? COLOR_RAY_X : COLOR_RAY_Y;
+    fb.drawLine(px, py, toScreenX(layout, hit.hitX), toScreenY(layout, hit.hitY), color);
   }
 }
 

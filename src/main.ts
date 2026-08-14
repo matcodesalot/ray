@@ -12,7 +12,9 @@ import { Keyboard } from './input/keys';
 import { Mouse } from './input/mouse';
 import { SCHEMES, otherScheme, type SchemeName } from './input/scheme';
 import { Player } from './player';
-import { drawMap, drawPlayer, layoutMinimap } from './render/minimap';
+import { drawDepthProfile } from './render/depthprofile';
+import { drawMap, drawPlayer, drawRays, layoutMinimap, type Rect } from './render/minimap';
+import { RayFan } from './render/raycast';
 import { LEVEL_1 } from './world/levels/level1';
 
 /** Look up a required element, failing loudly rather than propagating a null. */
@@ -34,8 +36,24 @@ const fps = new FpsCounter();
 const map = LEVEL_1;
 const player = Player.atSpawn(map);
 
+/** One ray per screen column — the same fan that becomes the 3D view in Stage 4. */
+const fan = new RayFan(VIEW_W);
+
 const keys = new Keyboard();
 const mouse = new Mouse(canvas);
+
+/** Height of the depth-profile strip along the bottom of the view. */
+const PROFILE_H = 52;
+
+const MAP_BOUNDS: Rect = { x: 0, y: 0, w: VIEW_W, h: VIEW_H - PROFILE_H };
+const PROFILE_BOUNDS: Rect = { x: 0, y: VIEW_H - PROFILE_H, w: VIEW_W, h: PROFILE_H };
+
+/** How many columns to skip when drawing the fan: 320 lines at once is an opaque wedge. */
+const RAY_STRIDES = [8, 4, 2, 1, 32, 16];
+let strideIndex = 0;
+
+/** Whether the profile plots euclidean distance instead of perpendicular. See Stage 3 doc. */
+let showEuclidean = false;
 
 let schemeName: SchemeName = 'modern';
 mouse.enabled = SCHEMES[schemeName].usesMouseLook;
@@ -95,6 +113,8 @@ resize();
 startLoop({
   update(dt) {
     if (keys.wasPressed('Backquote')) setScheme(otherScheme(schemeName));
+    if (keys.wasPressed('KeyF')) showEuclidean = !showEuclidean;
+    if (keys.wasPressed('KeyR')) strideIndex = (strideIndex + 1) % RAY_STRIDES.length;
 
     const intent = SCHEMES[schemeName].poll(keys, mouse);
 
@@ -121,9 +141,13 @@ startLoop({
   },
 
   render() {
-    const layout = layoutMinimap(framebuffer, map);
+    fan.cast(map, player);
+
+    const layout = layoutMinimap(map, MAP_BOUNDS);
     drawMap(framebuffer, map, layout);
+    drawRays(framebuffer, player, fan.hits, layout, RAY_STRIDES[strideIndex]!);
     drawPlayer(framebuffer, player, layout);
+    drawDepthProfile(framebuffer, fan.hits, PROFILE_BOUNDS, showEuclidean);
 
     if (needsClear) {
       // Paint the letterbox bars. Only after a resize: the image covers the viewport
@@ -143,6 +167,9 @@ startLoop({
     overlay.textContent =
       `${fps.value.toFixed(0)} fps\n` +
       `pos ${player.x.toFixed(2)}, ${player.y.toFixed(2)}   heading ${heading.toFixed(0)}°\n` +
+      `\n` +
+      `rays  every ${RAY_STRIDES[strideIndex]} column(s)   (R)\n` +
+      `depth ${showEuclidean ? 'EUCLIDEAN — fisheye' : 'perpendicular — correct'}   (F)\n` +
       `\n` +
       `scheme: ${scheme.name}  (\` to switch)\n` +
       `${scheme.help}` +
