@@ -153,8 +153,7 @@ function brickTexture(r: number, g: number, b: number, seed: number): Texture {
  * one along the bottom and right implies a light source and gives the flat surface depth.
  * It is the same trick as Stage 4's side shading, one level down.
  */
-function blockTexture(r: number, g: number, b: number, seed: number): Texture {
-  const BLOCK = 32;
+function blockTexture(r: number, g: number, b: number, seed: number, BLOCK = 32): Texture {
   const JOINT = 2;
   const BEVEL = 3;
 
@@ -299,6 +298,26 @@ export const WALL_TEXTURES: Readonly<Record<number, Texture>> = {
   [Tile.Wall4]: plankTexture(158, 116, 62, 53),
   [Tile.Door]: doorTexture(),
 };
+
+/**
+ * The floor: small flagstones.
+ *
+ * Deliberately busier and higher-contrast than the walls. Floor texels are sampled at a
+ * steep angle and compress hard toward the horizon, so a subtle pattern turns to mush;
+ * strong joint lines survive the compression and are what actually convey motion as you
+ * walk. Unlike walls, there is one floor texture for the whole level — the map format has
+ * no per-cell floor data, and it does not need any.
+ */
+export const FLOOR_TEXTURE: Texture = blockTexture(104, 100, 96, 71, 16);
+
+/**
+ * The ceiling: dark, low-contrast rough stone.
+ *
+ * Kept quiet on purpose. The ceiling occupies as much screen as the floor but carries no
+ * information — you never navigate by it — so a busy one just competes with the walls for
+ * attention.
+ */
+export const CEILING_TEXTURE: Texture = roughTexture(58, 58, 66, 89);
 
 /** Fallback for a tile with no texture registered — deliberately loud. */
 export const MISSING_TEXTURE: Texture = generate((x, y) =>

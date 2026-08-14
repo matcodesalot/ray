@@ -14,8 +14,10 @@ import { SCHEMES, otherScheme, type SchemeName } from './input/scheme';
 import { Player } from './player';
 import { drawDepthProfile } from './render/depthprofile';
 import { drawMap, drawPlayer, drawRays, layoutMinimap, type Rect } from './render/minimap';
+import { drawFloorAndCeiling } from './render/floors';
+import { DEFAULT_RENDER_OPTIONS } from './render/options';
 import { RayFan } from './render/raycast';
-import { drawWalls } from './render/walls';
+import { createWallSpans, drawWalls } from './render/walls';
 import { LEVEL_1 } from './world/levels/level1';
 
 /** Look up a required element, failing loudly rather than propagating a null. */
@@ -54,12 +56,16 @@ const RAY_STRIDES = [8, 4, 2, 1, 32, 16];
 let strideIndex = 0;
 
 /**
- * Whether to use euclidean instead of perpendicular distance.
+ * Renderer switches, all of them teaching aids rather than settings.
  *
- * A teaching switch, not an option. In the first-person view it bows the walls; on the
- * top-down profile it lifts the plateau at both edges. Same cause, two views of it.
+ * `useEuclidean` in particular is not an option anyone would want: in the first-person
+ * view it bows the walls, and on the top-down profile it lifts the plateau at both edges.
+ * Same cause, two views of it.
  */
-let showEuclidean = false;
+const render = { ...DEFAULT_RENDER_OPTIONS };
+
+/** Where the wall pass leaves its column extents for the floor pass to work around. */
+const spans = createWallSpans(VIEW_W);
 
 /**
  * The top-down view from Stages 2 and 3 is kept as a debug view rather than deleted. It
@@ -68,12 +74,6 @@ let showEuclidean = false;
  */
 type ViewMode = 'first-person' | 'top-down';
 let viewMode: ViewMode = 'first-person';
-
-/** Distance shading. Off is worth seeing — the depth cue vanishes completely. */
-let lighting = true;
-
-/** Textured walls. Off falls back to the Stage 5 flat colours, for comparison. */
-let textured = true;
 
 let schemeName: SchemeName = 'modern';
 mouse.enabled = SCHEMES[schemeName].usesMouseLook;
@@ -133,10 +133,11 @@ resize();
 startLoop({
   update(dt) {
     if (keys.wasPressed('Backquote')) setScheme(otherScheme(schemeName));
-    if (keys.wasPressed('KeyF')) showEuclidean = !showEuclidean;
+    if (keys.wasPressed('KeyF')) render.useEuclidean = !render.useEuclidean;
     if (keys.wasPressed('KeyR')) strideIndex = (strideIndex + 1) % RAY_STRIDES.length;
-    if (keys.wasPressed('KeyL')) lighting = !lighting;
-    if (keys.wasPressed('KeyT')) textured = !textured;
+    if (keys.wasPressed('KeyL')) render.lighting = !render.lighting;
+    if (keys.wasPressed('KeyT')) render.textured = !render.textured;
+    if (keys.wasPressed('KeyC')) render.castFloors = !render.castFloors;
     if (keys.wasPressed('KeyM')) {
       viewMode = viewMode === 'first-person' ? 'top-down' : 'first-person';
     }
@@ -169,13 +170,16 @@ startLoop({
     fan.cast(map, player);
 
     if (viewMode === 'first-person') {
-      drawWalls(framebuffer, fan.hits, showEuclidean, lighting, textured);
+      // Walls first, recording which pixels they cover, so the floor pass can skip them
+      // rather than being painted over.
+      drawWalls(framebuffer, fan.hits, spans, render);
+      drawFloorAndCeiling(framebuffer, player, spans, render);
     } else {
       const layout = layoutMinimap(map, MAP_BOUNDS);
       drawMap(framebuffer, map, layout);
       drawRays(framebuffer, player, fan.hits, layout, RAY_STRIDES[strideIndex]!);
       drawPlayer(framebuffer, player, layout);
-      drawDepthProfile(framebuffer, fan.hits, PROFILE_BOUNDS, showEuclidean);
+      drawDepthProfile(framebuffer, fan.hits, PROFILE_BOUNDS, render.useEuclidean);
     }
 
     if (needsClear) {
@@ -199,9 +203,10 @@ startLoop({
       `\n` +
       `view  ${viewMode}   (M)\n` +
       (viewMode === 'top-down' ? `rays  every ${RAY_STRIDES[strideIndex]} column(s)   (R)\n` : '') +
-      `depth ${showEuclidean ? 'EUCLIDEAN — fisheye' : 'perpendicular — correct'}   (F)\n` +
-      `light ${lighting ? 'distance shading on' : 'OFF — flat'}   (L)\n` +
-      `tex   ${textured ? 'textured' : 'OFF — flat colours'}   (T)\n` +
+      `depth ${render.useEuclidean ? 'EUCLIDEAN — fisheye' : 'perpendicular — correct'}   (F)\n` +
+      `light ${render.lighting ? 'distance shading on' : 'OFF — flat'}   (L)\n` +
+      `tex   ${render.textured ? 'textured' : 'OFF — flat colours'}   (T)\n` +
+      `floor ${render.castFloors ? 'cast + textured' : 'OFF — flat bands'}   (C)\n` +
       `\n` +
       `scheme: ${scheme.name}  (\` to switch)\n` +
       `${scheme.help}` +

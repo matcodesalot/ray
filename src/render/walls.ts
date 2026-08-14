@@ -4,6 +4,7 @@ import { LIGHT_UNIT, rgb, shade } from '../engine/color';
 import type { Framebuffer } from '../engine/framebuffer';
 import { Tile } from '../world/tiles';
 import { lightFactor } from './lighting';
+import type { RenderOptions } from './options';
 import type { RayHit } from './raycast';
 
 /**
@@ -37,8 +38,27 @@ import type { RayHit } from './raycast';
  * makes that assumption explicit when it casts floors.
  */
 
-const COLOR_CEILING = rgb(56, 56, 64);
-const COLOR_FLOOR = rgb(84, 76, 68);
+/**
+ * Where the wall ended up in each screen column, clamped to the framebuffer.
+ *
+ * Recorded so the floor and ceiling pass knows which pixels are already spoken for. The
+ * alternative — painting the floor across the whole screen and letting walls overwrite it
+ * — throws away a texture fetch and a shade for every pixel a wall covers, which in a
+ * corridor is most of the screen.
+ *
+ * In Stage 10 this same idea returns as a proper per-column depth buffer, which sprites
+ * test against to decide whether they are behind a wall.
+ */
+export interface WallSpans {
+  /** First screen row the wall covers, per column. */
+  top: Int32Array;
+  /** One past the last row the wall covers, per column. */
+  bottom: Int32Array;
+}
+
+export function createWallSpans(width: number): WallSpans {
+  return { top: new Int32Array(width), bottom: new Int32Array(width) };
+}
 
 /**
  * How much darker a y-side face is drawn than an x-side one.
@@ -71,17 +91,15 @@ const FALLBACK = rgb(160, 160, 160);
 export function drawWalls(
   fb: Framebuffer,
   hits: readonly RayHit[],
-  useEuclidean = false,
-  lighting = true,
-  textured = true,
+  spans: WallSpans,
+  options: RenderOptions,
 ): void {
+  const { useEuclidean, lighting, textured } = options;
+
   const height = fb.height;
   const width = fb.width;
   const horizon = height >> 1;
   const pixels = fb.pixels;
-
-  fb.fillRect(0, 0, width, horizon, COLOR_CEILING);
-  fb.fillRect(0, horizon, width, height - horizon, COLOR_FLOOR);
 
   const columns = Math.min(hits.length, width);
 
@@ -108,15 +126,21 @@ export function drawWalls(
     const depth = lighting ? lightFactor(hit.perpDist) : LIGHT_UNIT;
     const brightness = (side * depth) >> 8;
 
-    if (!textured) {
-      const base = WALL_COLORS[hit.tile] ?? FALLBACK;
-      fb.verticalSpan(x, top, top + drawn, shade(base, brightness));
-      continue;
-    }
-
     const yStart = top < 0 ? 0 : top;
     const yEnd = top + drawn > height ? height : top + drawn;
+
+    // Record the covered range before anything can `continue` past it, so the floor pass
+    // never inherits a stale span from the previous frame.
+    spans.top[x] = yStart;
+    spans.bottom[x] = yEnd;
+
     if (yStart >= yEnd) continue;
+
+    if (!textured) {
+      const base = WALL_COLORS[hit.tile] ?? FALLBACK;
+      fb.verticalSpan(x, yStart, yEnd, shade(base, brightness));
+      continue;
+    }
 
     const texture = textureFor(hit.tile).data;
 

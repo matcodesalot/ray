@@ -19,13 +19,14 @@ import { LIGHT_UNIT } from '../engine/color';
 const LIGHT_RANGE = 16;
 
 /**
- * How dark the furthest wall gets, as a fraction of full brightness.
+ * How dark the furthest surface gets, as a fraction of full brightness.
  *
- * Not zero. Ceilings and floors are still flat unshaded colours until Stage 7, so walls
- * fading to pure black would vanish into a lit floor and look like holes in the world.
- * Once floors are cast and shaded by the same curve, this can go much lower.
+ * Stage 5 had to keep this at 0.2, because floors and ceilings were still flat unshaded
+ * bands and walls fading to black would have read as holes punched in a lit world. Now
+ * that floors and ceilings run through this same curve, everything darkens together and
+ * the value can come down to where it actually looks like a dark corridor.
  */
-const MIN_LIGHT = 0.2;
+const MIN_LIGHT = 0.07;
 
 /**
  * How many distinct brightness levels exist between full and MIN_LIGHT.
