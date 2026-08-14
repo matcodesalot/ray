@@ -69,6 +69,9 @@ let showEuclidean = false;
 type ViewMode = 'first-person' | 'top-down';
 let viewMode: ViewMode = 'first-person';
 
+/** Distance shading. Off is worth seeing — the depth cue vanishes completely. */
+let lighting = true;
+
 let schemeName: SchemeName = 'modern';
 mouse.enabled = SCHEMES[schemeName].usesMouseLook;
 
@@ -129,6 +132,7 @@ startLoop({
     if (keys.wasPressed('Backquote')) setScheme(otherScheme(schemeName));
     if (keys.wasPressed('KeyF')) showEuclidean = !showEuclidean;
     if (keys.wasPressed('KeyR')) strideIndex = (strideIndex + 1) % RAY_STRIDES.length;
+    if (keys.wasPressed('KeyL')) lighting = !lighting;
     if (keys.wasPressed('KeyM')) {
       viewMode = viewMode === 'first-person' ? 'top-down' : 'first-person';
     }
@@ -161,7 +165,7 @@ startLoop({
     fan.cast(map, player);
 
     if (viewMode === 'first-person') {
-      drawWalls(framebuffer, fan.hits, showEuclidean);
+      drawWalls(framebuffer, fan.hits, showEuclidean, lighting);
     } else {
       const layout = layoutMinimap(map, MAP_BOUNDS);
       drawMap(framebuffer, map, layout);
@@ -192,6 +196,7 @@ startLoop({
       `view  ${viewMode}   (M)\n` +
       (viewMode === 'top-down' ? `rays  every ${RAY_STRIDES[strideIndex]} column(s)   (R)\n` : '') +
       `depth ${showEuclidean ? 'EUCLIDEAN — fisheye' : 'perpendicular — correct'}   (F)\n` +
+      `light ${lighting ? 'distance shading on' : 'OFF — flat'}   (L)\n` +
       `\n` +
       `scheme: ${scheme.name}  (\` to switch)\n` +
       `${scheme.help}` +

@@ -1,6 +1,7 @@
-import { rgb } from '../engine/color';
+import { LIGHT_UNIT, rgb, shade } from '../engine/color';
 import type { Framebuffer } from '../engine/framebuffer';
 import { Tile } from '../world/tiles';
+import { lightFactor } from './lighting';
 import type { RayHit } from './raycast';
 
 /**
@@ -47,39 +48,17 @@ const COLOR_FLOOR = rgb(84, 76, 68);
  *
  * It is a cheap stand-in for directional light, and the original used exactly this trick.
  */
-const SIDE_SHADE = 0.62;
+const SIDE_SHADE = Math.round(0.62 * LIGHT_UNIT);
 
-interface WallPalette {
-  /** x-side faces: those running north-south, struck while stepping in x. */
-  light: number;
-  /** y-side faces, drawn darker. */
-  dark: number;
-}
-
-/**
- * Colours are darkened once here at startup rather than per column at run time.
- *
- * Walls are flat-shaded per column at this stage, so there are only ever a handful of
- * distinct colours on screen. Stage 5 introduces real per-distance shading and with it
- * the question of how to do colour arithmetic cheaply; there is no reason to answer that
- * question yet.
- */
-function palette(r: number, g: number, b: number): WallPalette {
-  return {
-    light: rgb(r, g, b),
-    dark: rgb(r * SIDE_SHADE, g * SIDE_SHADE, b * SIDE_SHADE),
-  };
-}
-
-const WALL_PALETTES: Readonly<Record<number, WallPalette>> = {
-  [Tile.Wall1]: palette(168, 72, 64),
-  [Tile.Wall2]: palette(78, 122, 176),
-  [Tile.Wall3]: palette(88, 154, 94),
-  [Tile.Wall4]: palette(178, 142, 70),
-  [Tile.Door]: palette(206, 176, 78),
+const WALL_COLORS: Readonly<Record<number, number>> = {
+  [Tile.Wall1]: rgb(168, 72, 64),
+  [Tile.Wall2]: rgb(78, 122, 176),
+  [Tile.Wall3]: rgb(88, 154, 94),
+  [Tile.Wall4]: rgb(178, 142, 70),
+  [Tile.Door]: rgb(206, 176, 78),
 };
 
-const FALLBACK = palette(160, 160, 160);
+const FALLBACK = rgb(160, 160, 160);
 
 /**
  * Draw the world: flat ceiling, flat floor, one vertical span per column.
@@ -91,6 +70,7 @@ export function drawWalls(
   fb: Framebuffer,
   hits: readonly RayHit[],
   useEuclidean = false,
+  lighting = true,
 ): void {
   const height = fb.height;
   const horizon = height >> 1;
@@ -112,7 +92,14 @@ export function drawWalls(
     const top = Math.round(horizon - lineHeight / 2);
     const bottom = top + Math.round(lineHeight);
 
-    const colors = WALL_PALETTES[hit.tile] ?? FALLBACK;
-    fb.verticalSpan(x, top, bottom, hit.side === 1 ? colors.dark : colors.light);
+    // Two independent brightness factors, combined by an integer multiply: which face of
+    // the cube we are looking at, and how far away it is. Both are 0..256, so multiplying
+    // and shifting back down by 8 keeps everything in integers.
+    const side = hit.side === 1 ? SIDE_SHADE : LIGHT_UNIT;
+    const depth = lighting ? lightFactor(hit.perpDist) : LIGHT_UNIT;
+    const brightness = (side * depth) >> 8;
+
+    const base = WALL_COLORS[hit.tile] ?? FALLBACK;
+    fb.verticalSpan(x, top, bottom, shade(base, brightness));
   }
 }
