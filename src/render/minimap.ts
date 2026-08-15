@@ -3,6 +3,7 @@ import type { Framebuffer } from '../engine/framebuffer';
 import type { Player } from '../player';
 import type { GameMap } from '../world/map';
 import { DoorAxis } from '../world/doors';
+import type { SpriteEntity } from '../world/entities';
 import { Tile } from '../world/tiles';
 import type { RayHit } from './raycast';
 
@@ -24,6 +25,7 @@ const COLOR_PLAYER = rgb(255, 214, 64);
 const COLOR_DIR = rgb(255, 255, 255);
 const COLOR_PLANE = rgb(96, 200, 255);
 const COLOR_DOOR = rgb(214, 182, 84);
+const COLOR_SPRITE = rgb(226, 138, 92);
 const COLOR_RAY_X = rgb(120, 90, 40);
 const COLOR_RAY_Y = rgb(150, 115, 55);
 
@@ -181,6 +183,27 @@ export function drawRays(
     // Colour by which face was struck, so the alternation along a wall is visible.
     const color = hit.side === 0 ? COLOR_RAY_X : COLOR_RAY_Y;
     fb.drawLine(px, py, toScreenX(layout, hit.hitX), toScreenY(layout, hit.hitY), color);
+  }
+}
+
+/**
+ * Draw sprite entities as small markers.
+ *
+ * Worth having: a sprite's position is a pair of floats rather than a cell, so "is it
+ * where I think it is" is a question the first-person view answers badly and this answers
+ * instantly.
+ */
+export function drawSprites(
+  fb: Framebuffer,
+  sprites: readonly SpriteEntity[],
+  layout: MinimapLayout,
+): void {
+  const size = Math.max(2, Math.round(layout.scale * 0.3));
+
+  for (const sprite of sprites) {
+    const sx = Math.round(toScreenX(layout, sprite.x) - size / 2);
+    const sy = Math.round(toScreenY(layout, sprite.y) - size / 2);
+    fb.fillRect(sx, sy, size, size, COLOR_SPRITE);
   }
 }
 

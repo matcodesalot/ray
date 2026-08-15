@@ -34,6 +34,20 @@ export function rgb(r: number, g: number, b: number): number {
 export const BLACK = rgb(0, 0, 0);
 export const WHITE = rgb(255, 255, 255);
 
+/**
+ * The value meaning "draw nothing here", used by sprite textures.
+ *
+ * Plain zero, which is every channel *including alpha* at 0. That makes the transparency
+ * test a single integer comparison — the cheapest thing available, and it runs once per
+ * sprite pixel.
+ *
+ * Zero cannot collide with a real colour: `rgb()` always sets alpha to 0xff, so even pure
+ * black comes back as a large non-zero number. The classic alternative, reserving a
+ * "magic" visible colour like magenta, has exactly that collision problem and needs the
+ * artist to avoid the colour.
+ */
+export const TRANSPARENT = 0;
+
 /** Where the alpha byte sits, so shade() can force it back to opaque. */
 const ALPHA_MASK = LITTLE_ENDIAN ? 0xff000000 : 0x000000ff;
 

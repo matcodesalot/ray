@@ -15,10 +15,11 @@ import { Mouse } from './input/mouse';
 import { SCHEMES, otherScheme, type SchemeName } from './input/scheme';
 import { Player } from './player';
 import { drawDepthProfile } from './render/depthprofile';
-import { drawMap, drawPlayer, drawRays, layoutMinimap, type Rect } from './render/minimap';
+import { drawMap, drawPlayer, drawRays, drawSprites, layoutMinimap, type Rect } from './render/minimap';
 import { drawFloorAndCeiling } from './render/floors';
 import { DEFAULT_RENDER_OPTIONS } from './render/options';
 import { RayFan } from './render/raycast';
+import { SpriteRenderer } from './render/sprites';
 import { createWallSpans, drawWalls } from './render/walls';
 import { LEVEL_1 } from './world/levels/level1';
 
@@ -68,6 +69,9 @@ const render = { ...DEFAULT_RENDER_OPTIONS };
 
 /** Where the wall pass leaves its column extents for the floor pass to work around. */
 const spans = createWallSpans(VIEW_W);
+
+/** Owns the far-to-near ordering buffers, so drawing sprites allocates nothing. */
+const spriteRenderer = new SpriteRenderer(map.sprites.length);
 
 /**
  * The top-down view from Stages 2 and 3 is kept as a debug view rather than deleted. It
@@ -179,6 +183,7 @@ startLoop({
     if (keys.wasPressed('KeyT')) render.textured = !render.textured;
     if (keys.wasPressed('KeyC')) render.castFloors = !render.castFloors;
     if (keys.wasPressed('KeyN')) noclip = !noclip;
+    if (keys.wasPressed('KeyP')) render.sprites = !render.sprites;
     if (keys.wasPressed('KeyM')) {
       viewMode = viewMode === 'first-person' ? 'top-down' : 'first-person';
     }
@@ -221,10 +226,16 @@ startLoop({
       // rather than being painted over.
       drawWalls(framebuffer, fan.hits, spans, render);
       drawFloorAndCeiling(framebuffer, player, spans, render);
+      // Sprites last: they read the wall distances the ray fan already holds, and paint
+      // over whatever the first two passes left.
+      if (render.sprites) {
+        spriteRenderer.draw(framebuffer, player, map.sprites, fan.hits, render);
+      }
     } else {
       const layout = layoutMinimap(map, MAP_BOUNDS);
       drawMap(framebuffer, map, layout);
       drawRays(framebuffer, player, fan.hits, layout, RAY_STRIDES[strideIndex]!);
+      if (render.sprites) drawSprites(framebuffer, map.sprites, layout);
       drawPlayer(framebuffer, player, layout);
       drawDepthProfile(framebuffer, fan.hits, PROFILE_BOUNDS, render.useEuclidean);
     }
@@ -255,6 +266,7 @@ startLoop({
       `tex   ${render.textured ? 'textured' : 'OFF — flat colours'}   (T)\n` +
       `floor ${render.castFloors ? 'cast + textured' : 'OFF — flat bands'}   (C)\n` +
       `clip  ${noclip ? 'NOCLIP — walk through walls' : 'collision on'}   (N)\n` +
+      `sprite ${render.sprites ? `${map.sprites.length} drawn` : 'OFF'}   (P)\n` +
       `\n` +
       `scheme: ${scheme.name}  (\` to switch)\n` +
       `${scheme.help}` +

@@ -15,6 +15,8 @@ export interface RenderOptions {
   textured: boolean;
   /** Cast textured floors and ceilings, versus flat bands of colour. */
   castFloors: boolean;
+  /** Draw billboard sprites. */
+  sprites: boolean;
 }
 
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
@@ -22,4 +24,5 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   lighting: true,
   textured: true,
   castFloors: true,
+  sprites: true,
 };

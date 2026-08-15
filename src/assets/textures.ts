@@ -1,5 +1,6 @@
 import { TEX_SIZE } from '../config';
-import { rgb } from '../engine/color';
+import { TRANSPARENT, rgb } from '../engine/color';
+import { SpriteKind } from '../world/entities';
 import { Tile } from '../world/tiles';
 
 /**
@@ -339,6 +340,144 @@ export const FLOOR_TEXTURE: Texture = blockTexture(104, 100, 96, 71, 16);
  * attention.
  */
 export const CEILING_TEXTURE: Texture = roughTexture(58, 58, 66, 89);
+
+/**
+ * Sprite artwork.
+ *
+ * Unlike wall textures these are mostly empty: everything outside the object's silhouette
+ * is `TRANSPARENT`, and the renderer skips those texels entirely. Each picture fills its
+ * 64x64 box with the object standing on the bottom edge, because sprites are anchored by
+ * their feet.
+ */
+
+/** Signed distance from an ellipse, negative inside. Handy for round silhouettes. */
+function inEllipse(x: number, y: number, cx: number, cy: number, rx: number, ry: number): number {
+  const dx = (x - cx) / rx;
+  const dy = (y - cy) / ry;
+  return dx * dx + dy * dy - 1;
+}
+
+/** A wooden barrel: staves, iron hoops, and a lid seen slightly from above. */
+const BARREL_SPRITE: Texture = generate((x, y) => {
+  const LEFT = 12;
+  const RIGHT = 52;
+  const TOP = 8;
+  const BOTTOM = 63;
+
+  if (y < TOP || y > BOTTOM) return TRANSPARENT;
+
+  // The barrel bulges in the middle, so its half-width varies with height.
+  const t = (y - TOP) / (BOTTOM - TOP);
+  const bulge = Math.sin(t * Math.PI) * 3.5;
+  const halfWidth = (RIGHT - LEFT) / 2 + bulge;
+  const centreX = (LEFT + RIGHT) / 2;
+  const offset = x - centreX;
+  if (Math.abs(offset) > halfWidth) return TRANSPARENT;
+
+  const speckle = hash(x, y, 61) * 12 - 6;
+
+  // The lid, an ellipse at the top.
+  if (y < TOP + 7 && inEllipse(x, y, centreX, TOP + 6, halfWidth, 6.5) < 0) {
+    const ring = inEllipse(x, y, centreX, TOP + 6, halfWidth * 0.62, 4) < 0;
+    return tint(126, 88, 48, ring ? 1.12 : 0.9, speckle);
+  }
+
+  // Iron hoops.
+  if ((y > 17 && y < 22) || (y > 40 && y < 45) || y > BOTTOM - 4) {
+    return tint(88, 84, 92, 1 - Math.abs(offset) / halfWidth * 0.35, speckle);
+  }
+
+  // Staves running down the barrel, with the curve shaded from the left.
+  const stave = Math.abs(((offset + 60) % 9) - 4.5) < 0.7;
+  const curve = 1.16 - Math.abs(offset / halfWidth) * 0.5 + (offset < 0 ? 0.06 : -0.06);
+
+  return tint(146, 96, 52, curve * (stave ? 0.82 : 1), speckle);
+});
+
+/** A leafy plant in a pot. */
+const PLANT_SPRITE: Texture = generate((x, y) => {
+  const speckle = hash(x, y, 67) * 14 - 7;
+
+  // Pot at the bottom, tapering inward.
+  if (y >= 44) {
+    const taper = 20 - (y - 44) * 0.3;
+    if (Math.abs(x - 32) > taper) return TRANSPARENT;
+    const rim = y < 48;
+    const curve = 1.14 - Math.abs((x - 32) / taper) * 0.42;
+    return tint(138, 82, 58, curve * (rim ? 1.1 : 1), speckle);
+  }
+
+  // Foliage: several overlapping blobs, so the silhouette is ragged rather than a disc.
+  const fronds = [
+    [32, 22, 19, 20],
+    [18, 30, 12, 13],
+    [46, 30, 12, 13],
+    [24, 12, 10, 11],
+    [41, 13, 10, 11],
+  ] as const;
+
+  for (const [cx, cy, rx, ry] of fronds) {
+    const d = inEllipse(x, y, cx, cy, rx, ry);
+    if (d < 0) {
+      // Ragged edge: chip away at the boundary with noise.
+      if (d > -0.28 && hash(x, y, 71) > 0.45) continue;
+      const light = 0.78 - d * 0.42 + hash((x / 3) | 0, (y / 3) | 0, 73) * 0.28;
+      return tint(74, 132, 66, light, speckle);
+    }
+  }
+
+  return TRANSPARENT;
+});
+
+/** A standing lamp. The head is emissive, so it ignores distance shading. */
+const LAMP_SPRITE: Texture = generate((x, y) => {
+  const speckle = hash(x, y, 79) * 8 - 4;
+
+  // Base.
+  if (y >= 56) {
+    const width = 13 - (63 - y) * 0.7;
+    if (Math.abs(x - 32) > width) return TRANSPARENT;
+    return tint(96, 92, 86, 1.05 - Math.abs((x - 32) / width) * 0.35, speckle);
+  }
+
+  // Pole.
+  if (y >= 24) {
+    if (Math.abs(x - 32) > 2.5) return TRANSPARENT;
+    return tint(108, 104, 98, x < 32 ? 1.15 : 0.85, speckle);
+  }
+
+  // Glowing head.
+  const d = inEllipse(x, y, 32, 16, 13, 14);
+  if (d < 0) {
+    const glow = 1 - d * -0.55;
+    return rgb(byte(250 * glow), byte(226 * glow), byte(150 * glow));
+  }
+
+  return TRANSPARENT;
+});
+
+/** A free-standing stone column, full height. */
+const COLUMN_SPRITE: Texture = generate((x, y) => {
+  const speckle = hash(x, y, 83) * 12 - 6;
+
+  // Capital and base flare out.
+  const flare = y < 7 || y > 56 ? 25 : 19;
+  if (Math.abs(x - 32) > flare) return TRANSPARENT;
+
+  const curve = 1.2 - Math.abs((x - 32) / flare) * 0.55;
+
+  // Fluting down the shaft.
+  const flute = y > 8 && y < 56 ? (Math.sin((x - 32) * 0.85) * 0.5 + 0.5) * 0.22 + 0.88 : 1;
+
+  return tint(150, 146, 136, curve * flute, speckle);
+});
+
+export const SPRITE_TEXTURES: Readonly<Record<number, Texture>> = {
+  [SpriteKind.Barrel]: BARREL_SPRITE,
+  [SpriteKind.Plant]: PLANT_SPRITE,
+  [SpriteKind.Lamp]: LAMP_SPRITE,
+  [SpriteKind.Column]: COLUMN_SPRITE,
+};
 
 /** Fallback for a tile with no texture registered — deliberately loud. */
 export const MISSING_TEXTURE: Texture = generate((x, y) =>

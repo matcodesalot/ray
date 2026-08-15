@@ -1,4 +1,5 @@
 import { DoorAxis, DoorSystem, type Door, type DoorSpec } from './doors';
+import { SPRITE_CHARS, type SpriteEntity } from './entities';
 import { SPAWN_CHARS, TILE_CHARS, Tile, isSolidTile } from './tiles';
 
 export interface Spawn {
@@ -31,18 +32,26 @@ export class GameMap {
   /** Live door state. Empty for a level with no doors. */
   readonly doors: DoorSystem;
 
+  /**
+   * Objects standing in the world. Not part of the grid, and deliberately so: a sprite has
+   * a position rather than a cell, so two can share a cell and one can stand anywhere.
+   */
+  readonly sprites: readonly SpriteEntity[];
+
   constructor(
     width: number,
     height: number,
     tiles: Uint8Array,
     spawn: Spawn,
     doors: DoorSystem = new DoorSystem([], width, height),
+    sprites: readonly SpriteEntity[] = [],
   ) {
     this.width = width;
     this.height = height;
     this.tiles = tiles;
     this.spawn = spawn;
     this.doors = doors;
+    this.sprites = sprites;
   }
 
   /** The door in a cell, or undefined. */
@@ -93,6 +102,7 @@ export class GameMap {
  *   D            door (solid for now; opens in Stage 9)
  *   ^ v < >      player spawn, facing north / south / west / east
  *   @            player spawn, facing east
+ *   b g l c      sprites: barrel, plant, lamp, column (the cell stays floor)
  *
  * Parsing is strict and throws on anything malformed. A level that is subtly wrong —
  * a ragged row, a stray character, a hole in the outer wall — produces confusing
@@ -112,6 +122,7 @@ export function parseMap(source: string): GameMap {
   const tiles = new Uint8Array(width * height);
 
   let spawn: Spawn | null = null;
+  const sprites: SpriteEntity[] = [];
 
   for (let y = 0; y < height; y++) {
     const row = rows[y]!;
@@ -134,6 +145,16 @@ export function parseMap(source: string): GameMap {
         continue;
       }
 
+      const spriteKind = SPRITE_CHARS[char];
+      if (spriteKind !== undefined) {
+        // The sprite stands at the centre of an ordinary floor cell. Sprites do not block
+        // movement -- walking through a plant is better than a collision system that has
+        // to reason about objects as well as the grid.
+        sprites.push({ x: x + 0.5, y: y + 0.5, kind: spriteKind });
+        tiles[y * width + x] = Tile.Floor;
+        continue;
+      }
+
       const tile = TILE_CHARS[char];
       if (tile === undefined) {
         throw new Error(`Unknown map character '${char}' at ${x},${y}`);
@@ -145,7 +166,14 @@ export function parseMap(source: string): GameMap {
   if (!spawn) throw new Error('Map has no spawn marker (one of @ ^ v < >)');
 
   const doors = collectDoors(tiles, width, height);
-  const map = new GameMap(width, height, tiles, spawn, new DoorSystem(doors, width, height));
+  const map = new GameMap(
+    width,
+    height,
+    tiles,
+    spawn,
+    new DoorSystem(doors, width, height),
+    sprites,
+  );
   assertEnclosed(map);
   return map;
 }
