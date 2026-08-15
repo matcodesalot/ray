@@ -17,6 +17,13 @@ export interface RenderOptions {
   castFloors: boolean;
   /** Draw billboard sprites. */
   sprites: boolean;
+  /**
+   * Smooth the stair-stepped tops and bottoms of wall columns.
+   *
+   * Off by default, deliberately: the chunky 320x200 silhouette is the look this project
+   * chose, and the original had exactly these steps. It is here to be compared against.
+   */
+  edgeAntialiasing: boolean;
 }
 
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
@@ -25,4 +32,5 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   textured: true,
   castFloors: true,
   sprites: true,
+  edgeAntialiasing: false,
 };

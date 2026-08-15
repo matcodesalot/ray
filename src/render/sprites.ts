@@ -1,5 +1,5 @@
 import { SPRITE_TEXTURES } from '../assets/textures';
-import { PLANE_LENGTH, TEX_MASK, TEX_SIZE } from '../config';
+import { TEX_MASK, TEX_SIZE } from '../config';
 import { LIGHT_UNIT, TRANSPARENT, shade } from '../engine/color';
 import type { Framebuffer } from '../engine/framebuffer';
 import type { Player } from '../player';
@@ -137,8 +137,8 @@ export class SpriteRenderer {
      * Screen size, and why the two axes use different scales.
      *
      * Vertically, a one-unit-tall wall at distance d covers `VIEW_H / d` pixels — Stage 4.
-     * Horizontally, the camera plane spans `2 * PLANE_LENGTH * d` world units at distance
-     * d and maps to `VIEW_W` pixels, so one world unit is `VIEW_W / (2 * PLANE_LENGTH * d)`.
+     * Horizontally, the camera plane spans `2 * planeLength * d` world units at distance d
+     * and maps to `VIEW_W` pixels, so one world unit is `VIEW_W / (2 * planeLength * d)`.
      *
      * Those differ by about 1.21, and using one for both — as plenty of implementations do
      * — leaves every sprite subtly the wrong shape. The factor is not arbitrary: it is the
@@ -146,7 +146,7 @@ export class SpriteRenderer {
      * it right here is what makes a round barrel look round on the actual display.
      */
     const pixelsPerUnitY = height / depth;
-    const pixelsPerUnitX = width / (2 * PLANE_LENGTH * depth);
+    const pixelsPerUnitX = width / (2 * player.planeLength * depth);
 
     const spriteH = size.height * pixelsPerUnitY;
     const spriteW = size.width * pixelsPerUnitX;

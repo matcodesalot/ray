@@ -1,6 +1,6 @@
 import { DOOR_FRAME_TEXTURE, textureFor } from '../assets/textures';
 import { TEX_MASK, TEX_SIZE } from '../config';
-import { LIGHT_UNIT, rgb, shade } from '../engine/color';
+import { LIGHT_UNIT, blend, rgb, shade } from '../engine/color';
 import type { Framebuffer } from '../engine/framebuffer';
 import { Tile } from '../world/tiles';
 import { lightFactor } from './lighting';
@@ -83,7 +83,73 @@ const WALL_COLORS: Readonly<Record<number, number>> = {
 const FALLBACK = rgb(160, 160, 160);
 
 /**
- * Draw the world: flat ceiling, flat floor, one vertical span per column.
+ * Soften the stair-stepped top and bottom edges of wall columns.
+ *
+ * Wall height is quantised to whole pixels — `Math.round(lineHeight)` — so a smoothly
+ * changing silhouette comes out as runs of equal height with one-pixel steps between them.
+ * Wolfenstein had exactly this, and at 320x200 upscaled to a modern window each step is
+ * several screen pixels tall.
+ *
+ * The observation that makes this cheap: **vertical wall edges never stair-step.** A wall
+ * column is exactly vertical, so the only jagged edges in the entire scene are where a
+ * column meets the ceiling and the floor. That is two pixels per column — 640 a frame —
+ * rather than any kind of full-screen filter.
+ *
+ * Each boundary pixel is blended by how much of it the wall actually covers. The wall
+ * colour is sampled from the row safely inside the column and the background from the row
+ * safely outside, rather than assuming what is already in the boundary pixel, which keeps
+ * this independent of the rounding the wall pass happened to do.
+ *
+ * Runs after the floor pass, because it needs the ceiling and floor already painted.
+ *
+ * Off by default. The chunky look is deliberate, and this is here to be compared against.
+ */
+export function antialiasWallEdges(
+  fb: Framebuffer,
+  hits: readonly RayHit[],
+  options: RenderOptions,
+): void {
+  const width = fb.width;
+  const height = fb.height;
+  const horizon = height >> 1;
+  const pixels = fb.pixels;
+
+  const columns = Math.min(hits.length, width);
+
+  for (let x = 0; x < columns; x++) {
+    const hit = hits[x]!;
+    const distance = Math.max(1e-4, options.useEuclidean ? hit.euclidDist : hit.perpDist);
+    const lineHeight = height / distance;
+
+    // Below a few pixels there is no "inside" row to sample, and the column is mostly edge
+    // anyway. Leave it alone rather than smearing it.
+    if (lineHeight < 4) continue;
+
+    const exactTop = horizon - lineHeight / 2;
+    const exactBottom = exactTop + lineHeight;
+
+    // Top edge: the wall covers the lower part of row floor(exactTop).
+    const topRow = Math.floor(exactTop);
+    if (topRow - 1 >= 0 && topRow + 1 < height) {
+      const coverage = topRow + 1 - exactTop;
+      const outside = pixels[(topRow - 1) * width + x]!;
+      const inside = pixels[(topRow + 1) * width + x]!;
+      pixels[topRow * width + x] = blend(outside, inside, (coverage * 256) | 0);
+    }
+
+    // Bottom edge: the wall covers the upper part of row floor(exactBottom).
+    const bottomRow = Math.floor(exactBottom);
+    if (bottomRow - 1 >= 0 && bottomRow + 1 < height) {
+      const coverage = exactBottom - bottomRow;
+      const outside = pixels[(bottomRow + 1) * width + x]!;
+      const inside = pixels[(bottomRow - 1) * width + x]!;
+      pixels[bottomRow * width + x] = blend(outside, inside, (coverage * 256) | 0);
+    }
+  }
+}
+
+/**
+ * Draw one vertical span per column, recording what each covers.
  *
  * `useEuclidean` swaps in the straight-line distance to demonstrate fisheye. It is a
  * teaching switch, not an option — the renderer wants `perpDist`.

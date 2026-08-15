@@ -43,6 +43,14 @@ export class Player {
   planeX: number;
   planeY: number;
 
+  /**
+   * Half-width of the camera plane, i.e. the field of view.
+   *
+   * Lives on the player rather than staying a module constant so it can be changed at run
+   * time. It was always really camera state — the constant was just where it started.
+   */
+  planeLength: number;
+
   constructor(x: number, y: number, dirX: number, dirY: number) {
     this.x = x;
     this.y = y;
@@ -50,6 +58,7 @@ export class Player {
     this.dirY = dirY;
     this.planeX = 0;
     this.planeY = 0;
+    this.planeLength = PLANE_LENGTH;
     this.setDirection(dirX, dirY);
   }
 
@@ -70,8 +79,8 @@ export class Player {
     const length = Math.hypot(dirX, dirY) || 1;
     this.dirX = dirX / length;
     this.dirY = dirY / length;
-    this.planeX = -this.dirY * PLANE_LENGTH;
-    this.planeY = this.dirX * PLANE_LENGTH;
+    this.planeX = -this.dirY * this.planeLength;
+    this.planeY = this.dirX * this.planeLength;
   }
 
   /**
@@ -87,6 +96,12 @@ export class Player {
     const cos = Math.cos(radians);
     const sin = Math.sin(radians);
     this.setDirection(this.dirX * cos - this.dirY * sin, this.dirX * sin + this.dirY * cos);
+  }
+
+  /** Change the field of view, keeping the plane perpendicular and correctly scaled. */
+  setPlaneLength(length: number): void {
+    this.planeLength = Math.min(3, Math.max(0.15, length));
+    this.setDirection(this.dirX, this.dirY);
   }
 
   /** Move by an offset in world units, ignoring geometry entirely. */

@@ -83,3 +83,26 @@ export function shade(color: number, factor: number): number {
   const odd = ((((color >>> 8) & 0x00ff00ff) * factor) >>> 8) & 0x00ff00ff;
   return (even | (odd << 8) | ALPHA_MASK) >>> 0;
 }
+
+/**
+ * Mix two colours: `factor` of 0 gives `from`, 256 gives `to`.
+ *
+ * Same alternate-byte-lane trick as `shade`, done twice and added. The lanes cannot
+ * overflow into each other, and the reason is worth stating rather than hoping: each
+ * contribution is at most `255 * weight / 256`, and the two weights sum to exactly 256, so
+ * the total per channel is at most 255. Shift each side down *before* adding — multiply
+ * both first and the intermediate genuinely does overflow.
+ */
+export function blend(from: number, to: number, factor: number): number {
+  const inverse = 256 - factor;
+
+  const even =
+    ((((from & 0x00ff00ff) * inverse) >>> 8) & 0x00ff00ff) +
+    ((((to & 0x00ff00ff) * factor) >>> 8) & 0x00ff00ff);
+
+  const odd =
+    (((((from >>> 8) & 0x00ff00ff) * inverse) >>> 8) & 0x00ff00ff) +
+    (((((to >>> 8) & 0x00ff00ff) * factor) >>> 8) & 0x00ff00ff);
+
+  return (even | (odd << 8) | ALPHA_MASK) >>> 0;
+}

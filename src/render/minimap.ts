@@ -82,9 +82,20 @@ export function toScreenY(layout: MinimapLayout, worldY: number): number {
   return layout.originY + worldY * layout.scale;
 }
 
-/** Draw the level grid. Call before anything that should appear on top of it. */
-export function drawMap(fb: Framebuffer, map: GameMap, layout: MinimapLayout): void {
-  fb.clear(COLOR_BACKGROUND);
+/**
+ * Draw the level grid into `bounds`. Call before anything that should appear on top.
+ *
+ * Fills only its own rectangle rather than clearing the whole framebuffer, which is what
+ * lets the same code serve both as the full-screen debug view and as a corner minimap
+ * drawn over a finished first-person frame.
+ */
+export function drawMap(
+  fb: Framebuffer,
+  map: GameMap,
+  layout: MinimapLayout,
+  bounds: Rect,
+): void {
+  fb.fillRect(bounds.x, bounds.y, bounds.w, bounds.h, COLOR_BACKGROUND);
 
   const { scale } = layout;
 

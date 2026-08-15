@@ -15,12 +15,19 @@ import { Mouse } from './input/mouse';
 import { SCHEMES, otherScheme, type SchemeName } from './input/scheme';
 import { Player } from './player';
 import { drawDepthProfile } from './render/depthprofile';
-import { drawMap, drawPlayer, drawRays, drawSprites, layoutMinimap, type Rect } from './render/minimap';
 import { drawFloorAndCeiling } from './render/floors';
+import {
+  drawMap,
+  drawPlayer,
+  drawRays,
+  drawSprites,
+  layoutMinimap,
+  type Rect,
+} from './render/minimap';
 import { DEFAULT_RENDER_OPTIONS } from './render/options';
 import { RayFan } from './render/raycast';
 import { SpriteRenderer } from './render/sprites';
-import { createWallSpans, drawWalls } from './render/walls';
+import { antialiasWallEdges, createWallSpans, drawWalls, type WallSpans } from './render/walls';
 import { LEVEL_1 } from './world/levels/level1';
 
 /** Look up a required element, failing loudly rather than propagating a null. */
@@ -36,57 +43,15 @@ const overlay = requireElement<HTMLPreElement>('#overlay');
 const ctx = canvas.getContext('2d', { alpha: false });
 if (!ctx) throw new Error('Could not acquire a 2D context for the screen');
 
-const framebuffer = new Framebuffer(VIEW_W, VIEW_H);
-const fps = new FpsCounter();
+// ---------------------------------------------------------------------------------------
+// World and input
+// ---------------------------------------------------------------------------------------
 
 const map = LEVEL_1;
 const player = Player.atSpawn(map);
 
-/** One ray per screen column — the same fan that becomes the 3D view in Stage 4. */
-const fan = new RayFan(VIEW_W);
-
 const keys = new Keyboard();
 const mouse = new Mouse(canvas);
-
-/** Height of the depth-profile strip along the bottom of the view. */
-const PROFILE_H = 52;
-
-const MAP_BOUNDS: Rect = { x: 0, y: 0, w: VIEW_W, h: VIEW_H - PROFILE_H };
-const PROFILE_BOUNDS: Rect = { x: 0, y: VIEW_H - PROFILE_H, w: VIEW_W, h: PROFILE_H };
-
-/** How many columns to skip when drawing the fan: 320 lines at once is an opaque wedge. */
-const RAY_STRIDES = [8, 4, 2, 1, 32, 16];
-let strideIndex = 0;
-
-/**
- * Renderer switches, all of them teaching aids rather than settings.
- *
- * `useEuclidean` in particular is not an option anyone would want: in the first-person
- * view it bows the walls, and on the top-down profile it lifts the plateau at both edges.
- * Same cause, two views of it.
- */
-const render = { ...DEFAULT_RENDER_OPTIONS };
-
-/** Where the wall pass leaves its column extents for the floor pass to work around. */
-const spans = createWallSpans(VIEW_W);
-
-/** Owns the far-to-near ordering buffers, so drawing sprites allocates nothing. */
-const spriteRenderer = new SpriteRenderer(map.sprites.length);
-
-/**
- * The top-down view from Stages 2 and 3 is kept as a debug view rather than deleted. It
- * is the only place you can see where the rays actually go, and it stays useful for every
- * stage after this one — doors and sprites are both much easier to debug from above.
- */
-type ViewMode = 'first-person' | 'top-down';
-let viewMode: ViewMode = 'first-person';
-
-/**
- * Walk through walls. Kept as a switch rather than dropped, because being able to leave the
- * level and look back at it is genuinely useful for inspecting geometry — and it is the
- * quickest way to confirm that a rendering oddity is not a collision problem.
- */
-let noclip = false;
 
 let schemeName: SchemeName = 'modern';
 mouse.enabled = SCHEMES[schemeName].usesMouseLook;
@@ -96,6 +61,80 @@ function setScheme(name: SchemeName): void {
   mouse.enabled = SCHEMES[name].usesMouseLook;
   if (!SCHEMES[name].usesMouseLook) mouse.release();
 }
+
+// ---------------------------------------------------------------------------------------
+// Render state
+// ---------------------------------------------------------------------------------------
+
+/** Renderer switches, all of them teaching aids rather than settings. */
+const render = { ...DEFAULT_RENDER_OPTIONS };
+
+/**
+ * How the world is presented.
+ *
+ * The top-down view has been here since Stage 2 because it is the only place you can see
+ * where the rays actually go. It now also has a corner form, which is the shape it would
+ * take in an actual game.
+ */
+type ViewMode = 'first-person' | 'minimap' | 'top-down';
+const VIEW_MODES: readonly ViewMode[] = ['first-person', 'minimap', 'top-down'];
+let viewModeIndex = 0;
+const viewMode = (): ViewMode => VIEW_MODES[viewModeIndex]!;
+
+let noclip = false;
+let showHelp = false;
+
+/** How many columns to skip when drawing the fan: 320 lines at once is an opaque wedge. */
+const RAY_STRIDES = [8, 4, 2, 1, 32, 16];
+let strideIndex = 0;
+
+/**
+ * Internal resolution, as a multiple of the 320x200 base.
+ *
+ * Changing it reallocates everything sized off the framebuffer, which is why those are
+ * `let`. Worth having as a switch: dropping to 0.5 makes the pixel steps that edge
+ * anti-aliasing addresses impossible to miss, and 2 shows how much of the retro look is
+ * resolution rather than technique.
+ */
+const RESOLUTION_SCALES = [1, 0.5, 2];
+let scaleIndex = 0;
+
+let framebuffer!: Framebuffer;
+let fan!: RayFan;
+let spans!: WallSpans;
+let spriteRenderer!: SpriteRenderer;
+let mapBounds!: Rect;
+let profileBounds!: Rect;
+let cornerBounds!: Rect;
+
+/** Set on resize so the letterbox bars get repainted once rather than every frame. */
+let needsClear = true;
+
+function setResolution(scale: number): void {
+  const width = Math.round(VIEW_W * scale);
+  const height = Math.round(VIEW_H * scale);
+
+  framebuffer = new Framebuffer(width, height);
+  fan = new RayFan(width);
+  spans = createWallSpans(width);
+  spriteRenderer = new SpriteRenderer(map.sprites.length);
+
+  const profileHeight = Math.round(height * 0.26);
+  mapBounds = { x: 0, y: 0, w: width, h: height - profileHeight };
+  profileBounds = { x: 0, y: height - profileHeight, w: width, h: profileHeight };
+
+  // Corner minimap: a square in the top right.
+  const corner = Math.round(height * 0.34);
+  cornerBounds = { x: width - corner - 4, y: 4, w: corner, h: corner };
+
+  needsClear = true;
+}
+
+setResolution(RESOLUTION_SCALES[scaleIndex]!);
+
+// ---------------------------------------------------------------------------------------
+// Doors
+// ---------------------------------------------------------------------------------------
 
 /**
  * Whether the player's body overlaps a cell.
@@ -112,14 +151,7 @@ function playerOccupies(cellX: number, cellY: number): boolean {
   return dx * dx + dy * dy < PLAYER_RADIUS * PLAYER_RADIUS;
 }
 
-/**
- * Open whatever door the player is facing.
- *
- * Probing a few points along the view direction rather than casting a ray, because this
- * only needs to reach about a cell and a half and the ray fan is a render-time thing. The
- * player's own cell is included so a door you are standing in can be re-triggered, which
- * refreshes its hold timer.
- */
+/** Open whatever door the player is facing, probing a short way along the view direction. */
 function openDoorInFront(): void {
   for (const reach of [0, DOOR_REACH * 0.5, DOOR_REACH]) {
     const cellX = Math.floor(player.x + player.dirX * reach);
@@ -128,20 +160,16 @@ function openDoorInFront(): void {
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// Presentation
+// ---------------------------------------------------------------------------------------
+
 /** Where the upscaled image sits inside the canvas, in device pixels. */
 let viewport = { x: 0, y: 0, w: VIEW_W, h: VIEW_H };
 
-/** Set on resize so the letterbox bars get repainted once rather than every frame. */
-let needsClear = true;
-
 /**
- * Size the canvas's pixel grid to match its on-screen size in real device pixels, then
- * work out the largest DISPLAY_ASPECT rectangle that fits inside it, centred.
- *
- * Two different "sizes" are in play, and conflating them is the usual cause of blurry
- * canvas output: the CSS size (how big the element looks) and the backing-store size
- * (how many pixels it actually has). Setting the latter from the former times the device
- * pixel ratio makes one backing-store pixel equal one physical pixel.
+ * Size the canvas's pixel grid to real device pixels, then fit the largest DISPLAY_ASPECT
+ * rectangle inside it, centred. See Stage 1 for why the two sizes are not the same thing.
  */
 function resize(): void {
   const dpr = window.devicePixelRatio || 1;
@@ -153,7 +181,6 @@ function resize(): void {
     canvas.height = pixelH;
   }
 
-  // Fit to width, and if that overflows vertically, fit to height instead.
   let w = pixelW;
   let h = pixelW / DISPLAY_ASPECT;
   if (h > pixelH) {
@@ -174,18 +201,95 @@ function resize(): void {
 window.addEventListener('resize', resize);
 resize();
 
+// ---------------------------------------------------------------------------------------
+// Overlay
+// ---------------------------------------------------------------------------------------
+
+const fps = new FpsCounter();
+
+/**
+ * The overlay is rebuilt a few times a second rather than every frame.
+ *
+ * Building this string allocates — template literals, number formatting, concatenation —
+ * and it was the last remaining source of garbage in the loop now that every render pass
+ * writes into preallocated buffers. At 8Hz it still reads as live and the render path
+ * allocates nothing at all.
+ */
+const OVERLAY_INTERVAL = 0.125;
+let overlaySince = OVERLAY_INTERVAL;
+
+const HELP = [
+  'CONTROLS',
+  '  Space     open door',
+  '  `         switch control scheme',
+  '  H         close this help',
+  '',
+  'VIEW',
+  '  M         first-person / minimap / top-down',
+  '  R         ray density (top-down only)',
+  '  [ ]       field of view',
+  '  - =       internal resolution',
+  '',
+  'RENDERER  (each stage of the walkthrough, switchable)',
+  '  T         wall textures            (stage 6)',
+  '  L         distance shading         (stage 5)',
+  '  C         floor/ceiling casting    (stage 7)',
+  '  P         sprites                  (stage 10)',
+  '  X         edge anti-aliasing       (stage 11)',
+  '  F         euclidean distance -> fisheye  (stage 3)',
+  '',
+  'MOVEMENT',
+  '  N         noclip',
+].join('\n');
+
+function buildOverlay(): string {
+  const scheme = SCHEMES[schemeName];
+
+  if (showHelp) return `${HELP}\n  ${scheme.help}`;
+
+  const heading = ((Math.atan2(player.dirY, player.dirX) * 180) / Math.PI + 360) % 360;
+  const fov = ((2 * Math.atan(player.planeLength) * 180) / Math.PI).toFixed(0);
+
+  return (
+    `${fps.value.toFixed(0)} fps   ${framebuffer.width}x${framebuffer.height}   fov ${fov}°\n` +
+    `pos ${player.x.toFixed(2)}, ${player.y.toFixed(2)}   heading ${heading.toFixed(0)}°\n` +
+    `view ${viewMode()}` +
+    (render.edgeAntialiasing ? '   edge-AA' : '') +
+    (noclip ? '   NOCLIP' : '') +
+    (render.useEuclidean ? '   FISHEYE' : '') +
+    (render.lighting ? '' : '   unlit') +
+    (render.textured ? '' : '   untextured') +
+    (render.castFloors ? '' : '   flat-floors') +
+    (render.sprites ? '' : '   no-sprites') +
+    '\n\nH for help' +
+    (scheme.usesMouseLook && !mouse.isLocked ? ' · click to capture the mouse' : '')
+  );
+}
+
+// ---------------------------------------------------------------------------------------
+// Loop
+// ---------------------------------------------------------------------------------------
+
 startLoop({
   update(dt) {
     if (keys.wasPressed('Backquote')) setScheme(otherScheme(schemeName));
-    if (keys.wasPressed('KeyF')) render.useEuclidean = !render.useEuclidean;
+    if (keys.wasPressed('KeyH')) showHelp = !showHelp;
+    if (keys.wasPressed('KeyM')) viewModeIndex = (viewModeIndex + 1) % VIEW_MODES.length;
     if (keys.wasPressed('KeyR')) strideIndex = (strideIndex + 1) % RAY_STRIDES.length;
+    if (keys.wasPressed('KeyF')) render.useEuclidean = !render.useEuclidean;
     if (keys.wasPressed('KeyL')) render.lighting = !render.lighting;
     if (keys.wasPressed('KeyT')) render.textured = !render.textured;
     if (keys.wasPressed('KeyC')) render.castFloors = !render.castFloors;
-    if (keys.wasPressed('KeyN')) noclip = !noclip;
     if (keys.wasPressed('KeyP')) render.sprites = !render.sprites;
-    if (keys.wasPressed('KeyM')) {
-      viewMode = viewMode === 'first-person' ? 'top-down' : 'first-person';
+    if (keys.wasPressed('KeyX')) render.edgeAntialiasing = !render.edgeAntialiasing;
+    if (keys.wasPressed('KeyN')) noclip = !noclip;
+
+    if (keys.wasPressed('BracketLeft')) player.setPlaneLength(player.planeLength - 0.08);
+    if (keys.wasPressed('BracketRight')) player.setPlaneLength(player.planeLength + 0.08);
+
+    if (keys.wasPressed('Minus') || keys.wasPressed('Equal')) {
+      scaleIndex = (scaleIndex + 1) % RESOLUTION_SCALES.length;
+      setResolution(RESOLUTION_SCALES[scaleIndex]!);
     }
 
     const intent = SCHEMES[schemeName].poll(keys, mouse);
@@ -197,8 +301,7 @@ startLoop({
     player.rotate(intent.turn * TURN_SPEED * dt + intent.turnDelta);
 
     // Normalise diagonals. Holding forward and strafe together gives a vector of length
-    // sqrt(2), so without this you would move 41% faster diagonally than straight ahead —
-    // a bug old enough to have a name.
+    // sqrt(2), so without this you would move 41% faster diagonally than straight ahead.
     let { forward, strafe } = intent;
     const length = Math.hypot(forward, strafe);
     if (length > 1) {
@@ -215,34 +318,47 @@ startLoop({
     // ended up this tick rather than where they were at the start of it.
     map.doors.update(dt, playerOccupies);
 
+    overlaySince += dt;
     keys.endTick();
   },
 
   render() {
     fan.cast(map, player);
 
-    if (viewMode === 'first-person') {
+    if (viewMode() === 'top-down') {
+      const layout = layoutMinimap(map, mapBounds);
+      drawMap(framebuffer, map, layout, mapBounds);
+      drawRays(framebuffer, player, fan.hits, layout, RAY_STRIDES[strideIndex]!);
+      if (render.sprites) drawSprites(framebuffer, map.sprites, layout);
+      drawPlayer(framebuffer, player, layout);
+      drawDepthProfile(framebuffer, fan.hits, profileBounds, render.useEuclidean);
+    } else {
       // Walls first, recording which pixels they cover, so the floor pass can skip them
       // rather than being painted over.
       drawWalls(framebuffer, fan.hits, spans, render);
       drawFloorAndCeiling(framebuffer, player, spans, render);
-      // Sprites last: they read the wall distances the ray fan already holds, and paint
-      // over whatever the first two passes left.
+
+      // Sprites read the wall distances the ray fan already holds, and paint over whatever
+      // the first two passes left.
       if (render.sprites) {
         spriteRenderer.draw(framebuffer, player, map.sprites, fan.hits, render);
       }
-    } else {
-      const layout = layoutMinimap(map, MAP_BOUNDS);
-      drawMap(framebuffer, map, layout);
-      drawRays(framebuffer, player, fan.hits, layout, RAY_STRIDES[strideIndex]!);
-      if (render.sprites) drawSprites(framebuffer, map.sprites, layout);
-      drawPlayer(framebuffer, player, layout);
-      drawDepthProfile(framebuffer, fan.hits, PROFILE_BOUNDS, render.useEuclidean);
+
+      // Edge softening is last of the world passes: it blends wall edges against the
+      // ceiling and floor, so both have to be painted already.
+      if (render.edgeAntialiasing) {
+        antialiasWallEdges(framebuffer, fan.hits, render);
+      }
+
+      if (viewMode() === 'minimap') {
+        const layout = layoutMinimap(map, cornerBounds);
+        drawMap(framebuffer, map, layout, cornerBounds);
+        if (render.sprites) drawSprites(framebuffer, map.sprites, layout);
+        drawPlayer(framebuffer, player, layout);
+      }
     }
 
     if (needsClear) {
-      // Paint the letterbox bars. Only after a resize: the image covers the viewport
-      // rectangle completely every frame, so there is nothing else to erase.
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       needsClear = false;
@@ -251,25 +367,9 @@ startLoop({
     framebuffer.present(ctx, viewport.x, viewport.y, viewport.w, viewport.h);
 
     fps.tick();
-
-    const scheme = SCHEMES[schemeName];
-    const heading = ((Math.atan2(player.dirY, player.dirX) * 180) / Math.PI + 360) % 360;
-
-    overlay.textContent =
-      `${fps.value.toFixed(0)} fps\n` +
-      `pos ${player.x.toFixed(2)}, ${player.y.toFixed(2)}   heading ${heading.toFixed(0)}°\n` +
-      `\n` +
-      `view  ${viewMode}   (M)\n` +
-      (viewMode === 'top-down' ? `rays  every ${RAY_STRIDES[strideIndex]} column(s)   (R)\n` : '') +
-      `depth ${render.useEuclidean ? 'EUCLIDEAN — fisheye' : 'perpendicular — correct'}   (F)\n` +
-      `light ${render.lighting ? 'distance shading on' : 'OFF — flat'}   (L)\n` +
-      `tex   ${render.textured ? 'textured' : 'OFF — flat colours'}   (T)\n` +
-      `floor ${render.castFloors ? 'cast + textured' : 'OFF — flat bands'}   (C)\n` +
-      `clip  ${noclip ? 'NOCLIP — walk through walls' : 'collision on'}   (N)\n` +
-      `sprite ${render.sprites ? `${map.sprites.length} drawn` : 'OFF'}   (P)\n` +
-      `\n` +
-      `scheme: ${scheme.name}  (\` to switch)\n` +
-      `${scheme.help}` +
-      (scheme.usesMouseLook && !mouse.isLocked ? '\nclick to capture the mouse' : '');
+    if (overlaySince >= OVERLAY_INTERVAL) {
+      overlaySince = 0;
+      overlay.textContent = buildOverlay();
+    }
   },
 });
