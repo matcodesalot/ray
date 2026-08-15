@@ -1,4 +1,4 @@
-import { CEILING_TEXTURE, FLOOR_TEXTURE } from '../assets/textures';
+import type { TextureSet } from '../assets/decode';
 import { TEX_MASK, TEX_SIZE } from '../config';
 import { LIGHT_UNIT, rgb, shade } from '../engine/color';
 import type { Framebuffer } from '../engine/framebuffer';
@@ -63,6 +63,7 @@ export function drawFloorAndCeiling(
   fb: Framebuffer,
   player: Player,
   spans: WallSpans,
+  textures: TextureSet,
   options: RenderOptions,
 ): void {
   const width = fb.width;
@@ -77,8 +78,8 @@ export function drawFloorAndCeiling(
     return;
   }
 
-  const floorTex = FLOOR_TEXTURE.data;
-  const ceilTex = CEILING_TEXTURE.data;
+  const floorTex = textures.floor.data;
+  const ceilTex = textures.ceiling.data;
 
   // The rays at the extreme left and right edges of the screen. Everything between is a
   // linear interpolation of these two, which is what makes the per-pixel step a plain add.

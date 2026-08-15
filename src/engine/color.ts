@@ -31,6 +31,23 @@ export function rgb(r: number, g: number, b: number): number {
     : ((r << 24) | (g << 16) | (b << 8) | 0xff) >>> 0;
 }
 
+/**
+ * Pack r, g, b and an explicit alpha.
+ *
+ * `rgb()` is the opaque case of this, and stays separate because it is what almost
+ * everything wants — only decoded image data carries alpha worth preserving.
+ */
+export function rgba(r: number, g: number, b: number, a: number): number {
+  return LITTLE_ENDIAN
+    ? ((a << 24) | (b << 16) | (g << 8) | r) >>> 0
+    : ((r << 24) | (g << 16) | (b << 8) | a) >>> 0;
+}
+
+/** Read the alpha channel out of a packed pixel. */
+export function alphaOf(color: number): number {
+  return LITTLE_ENDIAN ? color >>> 24 : color & 0xff;
+}
+
 export const BLACK = rgb(0, 0, 0);
 export const WHITE = rgb(255, 255, 255);
 

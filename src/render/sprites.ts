@@ -1,6 +1,6 @@
-import { SPRITE_TEXTURES } from '../assets/textures';
+import { spriteTexture, type TextureSet } from '../assets/decode';
 import { TEX_MASK, TEX_SIZE } from '../config';
-import { LIGHT_UNIT, TRANSPARENT, shade } from '../engine/color';
+import { LIGHT_UNIT, TRANSPARENT, alphaOf, blend, shade } from '../engine/color';
 import type { Framebuffer } from '../engine/framebuffer';
 import type { Player } from '../player';
 import { SPRITE_SIZES, SpriteKind, type SpriteEntity } from '../world/entities';
@@ -49,6 +49,7 @@ export class SpriteRenderer {
     player: Player,
     sprites: readonly SpriteEntity[],
     hits: readonly RayHit[],
+    textures: TextureSet,
     options: RenderOptions,
   ): void {
     const count = Math.min(sprites.length, this.order.length);
@@ -57,7 +58,7 @@ export class SpriteRenderer {
     this.sortFarToNear(player, sprites, count);
 
     for (let i = 0; i < count; i++) {
-      this.drawOne(fb, player, sprites[this.order[i]!]!, hits, options);
+      this.drawOne(fb, player, sprites[this.order[i]!]!, hits, textures, options);
     }
   }
 
@@ -100,6 +101,7 @@ export class SpriteRenderer {
     player: Player,
     sprite: SpriteEntity,
     hits: readonly RayHit[],
+    textures: TextureSet,
     options: RenderOptions,
   ): void {
     const width = fb.width;
@@ -187,8 +189,7 @@ export class SpriteRenderer {
     const clipY1 = startY + drawnH > height ? height : startY + drawnH;
     if (clipX0 >= clipX1 || clipY0 >= clipY1) return;
 
-    const texture = SPRITE_TEXTURES[sprite.kind]?.data;
-    if (!texture) return;
+    const texture = spriteTexture(textures, sprite.kind).data;
 
     const brightness =
       options.lighting && !EMISSIVE[sprite.kind] ? lightFactor(depth) : LIGHT_UNIT;
@@ -224,9 +225,29 @@ export class SpriteRenderer {
         const texel = texture[column + ((texY >> 16) & TEX_MASK)]!;
         texY += stepY;
 
-        // The colour key. One integer comparison, and the reason sprites can be any shape.
+        /**
+         * Three cases, cheapest first.
+         *
+         * Fully transparent is one integer comparison, and it is the common case — the
+         * loader guarantees such texels are exactly zero, RGB and all, precisely so this
+         * stays a single compare. Fully opaque is the Stage 10 path, untouched.
+         *
+         * Only genuinely partial pixels — the anti-aliased rim of real artwork, typically
+         * a few percent of a sprite — pay for a read of the destination and a blend.
+         *
+         * The alpha has to be read *before* shading: `shade()` forces the result opaque,
+         * so asking afterwards always answers 255.
+         */
         if (texel !== TRANSPARENT) {
-          pixels[index] = shade(texel, brightness);
+          const alpha = alphaOf(texel);
+          const lit = shade(texel, brightness);
+
+          pixels[index] =
+            alpha === 255
+              ? lit
+              : // `alpha + (alpha >> 7)` stretches 0..255 onto blend's 0..256, so that 255
+                // reaches full opacity instead of stopping one 256th short.
+                blend(pixels[index]!, lit, alpha + (alpha >> 7));
         }
 
         index += width;

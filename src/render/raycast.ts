@@ -140,7 +140,21 @@ function hitDoorSlab(
   if (along < openness) return false;
 
   out.perpDist = distance;
-  out.wallX = along - openness;
+
+  /**
+   * The material coordinate, mirrored when seen from the other side.
+   *
+   * Same rule as wall faces, and for the same reason: which way the coordinate should run
+   * depends on which way the camera plane points when you are looking at the slab. Without
+   * it a door reads correctly from one side and backwards from the other — invisible on a
+   * symmetric texture, obvious the moment the artwork has a handle or a sign on it.
+   *
+   * `1 - material` stays in range: material spans 0..1-openness, so the mirrored value
+   * spans openness..1.
+   */
+  const material = along - openness;
+  const mirrored = door.axis === DoorAxis.X ? rayDirY > 0 : rayDirX < 0;
+  out.wallX = mirrored ? 1 - material : material;
 
   // The slab of an X-axis door faces along y, which is what the renderer calls a y-side.
   out.side = door.axis === DoorAxis.X ? 1 : 0;
@@ -317,15 +331,21 @@ export function castRay(
    * An x-side face runs along y, so its texture coordinate is the fractional part of the
    * hit's y — and vice versa. No extra work: the DDA already computed the exact hit point.
    *
-   * The flip matters. Left to itself the coordinate runs in whichever direction the world
-   * axis happens to point, so the two faces on opposite sides of a block come out mirrored
-   * from each other. Harmless on a symmetric brick pattern, glaring on anything with
-   * writing or a recognisable motif — and it makes adjacent cells disagree at their seam.
-   * Reversing the coordinate on the two faces the ray meets from behind lines them all up.
+   * The flip decides which way round the texture reads on each face, and it has to agree
+   * with which way the camera plane points when you are looking at that face.
+   *
+   * Facing east, the plane points south, so screen-right corresponds to increasing y — and
+   * `frac(hitY)` therefore already rises left-to-right across the face. That one needs no
+   * flip. Facing west the plane points north, screen-right is *decreasing* y, and the
+   * coordinate has to be reversed. The two y-side cases work out the same way.
+   *
+   * Getting this backwards mirrors every wall in the level. It went unnoticed until Stage
+   * 12, because procedural brick and noise are symmetric enough that a mirrored copy looks
+   * identical — the moment a texture carried lettering it was unmistakable.
    */
   let wallX = side === 0 ? out.hitY : out.hitX;
   wallX -= Math.floor(wallX);
-  if ((side === 0 && rayDirX > 0) || (side === 1 && rayDirY < 0)) wallX = 1 - wallX;
+  if ((side === 0 && rayDirX < 0) || (side === 1 && rayDirY > 0)) wallX = 1 - wallX;
   out.wallX = wallX;
 
   return out;

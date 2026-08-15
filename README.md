@@ -1,11 +1,13 @@
 # ray
 
-A Wolfenstein 3D–style raycaster in TypeScript, built in eleven stages you can check out
+A Wolfenstein 3D–style raycaster in TypeScript, built in twelve stages you can check out
 and run individually.
 
 Everything is drawn by hand into a 320×200 buffer of 32-bit pixels — no WebGL, no canvas
-drawing calls beyond a single scaled blit per frame. Every texture is generated in code at
-startup, so there are no binary assets anywhere in the repository.
+drawing calls beyond a single scaled blit per frame.
+
+Textures are PNG files loaded before the first frame. The images that ship are deliberately
+ugly placeholders; drop your own 64×64 PNGs into `src/assets/images/` to replace them.
 
 ```bash
 npm install
@@ -14,7 +16,7 @@ npm run dev
 
 Press <kbd>H</kbd> in the browser for controls.
 
-![Textured walls, cast floors, sprites and a corner minimap](docs/images/sprites.png)
+![Textured walls, cast floors, sprites and a corner minimap](docs/images/image-textures.png)
 
 ---
 
@@ -30,12 +32,13 @@ Each stage is one commit and one tag, with a document explaining what it added a
 | 3 | [DDA](docs/stage-03-dda.md) | Casting 320 rays through the grid, exactly and cheaply |
 | 4 | [first 3D view](docs/stage-04-first-3d.md) | `VIEW_H / perpDist` — the entire projection |
 | 5 | [distance shading](docs/stage-05-shading.md) | Depth from brightness, and cheap per-pixel colour arithmetic |
-| 6 | [textures](docs/stage-06-textures.md) | `wallX`, fixed-point column stepping, procedural artwork |
+| 6 | [textures](docs/stage-06-textures.md) | `wallX`, fixed-point column stepping, texture mapping |
 | 7 | [floors and ceilings](docs/stage-07-floors-and-ceilings.md) | Row-based casting — the first genuinely per-pixel pass |
 | 8 | [collision](docs/stage-08-collision.md) | Circle-vs-grid with contact-normal sliding |
 | 9 | [doors](docs/stage-09-doors.md) | Recessed sliding slabs, and the one cell the DDA passes through |
 | 10 | [sprites](docs/stage-10-sprites.md) | Billboards, depth testing, painter ordering |
 | 11 | [polish](docs/stage-11-polish.md) | Minimap, help overlay, edge anti-aliasing, performance |
+| 12 | [image textures](docs/stage-12-image-textures.md) | Loading real PNGs: async boot, a manifest, alpha, orientation |
 
 ---
 
@@ -84,9 +87,11 @@ Measured at 320×200, median of 3000 frames, against a 16.67 ms budget:
 | floors and ceilings | 0.114 ms |
 | sprites (17 objects) | 0.003 ms |
 | edge anti-aliasing | 0.009 ms |
-| **full frame** | **0.191 ms** |
+| **full frame** | **0.166 ms** |
 
-Heap growth over 300 frames: **0 KB**. Nothing in the render path allocates.
+Heap growth over 300 frames: **0 KB**. Nothing in the render path allocates — the only
+asynchronous code in the project is the texture load, which runs once before the first
+frame.
 
 ---
 
@@ -101,13 +106,27 @@ src/
   engine/               framebuffer and pixel packing — knows nothing about the game
   world/                map, doors, collision, entities
   render/               raycast, walls, floors, sprites, lighting, minimap
-  assets/textures.ts    every texture, generated at startup
+  assets/               the texture manifest, loader, and the PNGs themselves
 docs/                   one document per stage
+tools/                  placeholder generator, verification scripts
 ```
 
 `engine/` and `core/` never import from `world/`; `render/` never mutates game state.
 
 ---
+
+---
+
+## Replacing the artwork
+
+Every texture is a 64×64 PNG in `src/assets/images/`, listed in `src/assets/manifest.ts`.
+Replace a file and it appears on the next reload. Four rules the loader cannot enforce for
+you, covered in [stage 12](docs/stage-12-image-textures.md):
+
+- wall images repeat once per cell, so their left and right edges must meet
+- floor and ceiling images tile in **both** axes
+- sprites need transparent margins and should stand on the bottom edge of the image
+- everything must be exactly 64×64 (the loader checks this one, and names the file)
 
 ## Things it deliberately does not do
 
@@ -117,5 +136,6 @@ docs/                   one document per stage
   adding them in [stage 10](docs/stage-10-sprites.md).
 - **No combat, enemies, or game logic.** This is the renderer and the world it moves
   through, not a game.
-- **No test framework.** Each stage was verified with throwaway scripts driving the real
-  modules; what those checked is written up in each stage document.
+- **No test framework.** Verification is a set of plain scripts under
+  [`tools/verify/`](tools/verify/) that import the real modules and assert against them:
+  `npm run verify -- --all`. What each stage checked is written up in its document.

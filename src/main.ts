@@ -8,6 +8,8 @@ import {
   VIEW_H,
   VIEW_W,
 } from './config';
+import { loadTextures } from './assets/loader';
+import type { TextureSet } from './assets/decode';
 import { FpsCounter, startLoop } from './core/loop';
 import { Framebuffer } from './engine/framebuffer';
 import { Keyboard } from './input/keys';
@@ -37,11 +39,23 @@ function requireElement<T extends Element>(selector: string): T {
   return element;
 }
 
+/**
+ * Acquire the drawing context, failing loudly rather than propagating a null.
+ *
+ * A function rather than an inline check for the same reason `requireElement` is one: the
+ * render loop now lives inside a hoisted function, and TypeScript will not carry a
+ * narrowing from module scope into a function that could — as far as it knows — have been
+ * called earlier. Returning a non-nullable type settles it at the boundary instead.
+ */
+function require2dContext(target: HTMLCanvasElement): CanvasRenderingContext2D {
+  const context = target.getContext('2d', { alpha: false });
+  if (!context) throw new Error('Could not acquire a 2D context for the screen');
+  return context;
+}
+
 const canvas = requireElement<HTMLCanvasElement>('#screen');
 const overlay = requireElement<HTMLPreElement>('#overlay');
-
-const ctx = canvas.getContext('2d', { alpha: false });
-if (!ctx) throw new Error('Could not acquire a 2D context for the screen');
+const ctx = require2dContext(canvas);
 
 // ---------------------------------------------------------------------------------------
 // World and input
@@ -267,10 +281,46 @@ function buildOverlay(): string {
 }
 
 // ---------------------------------------------------------------------------------------
-// Loop
+// Boot
 // ---------------------------------------------------------------------------------------
 
-startLoop({
+/**
+ * The textures, once they have loaded.
+ *
+ * Assigned exactly once, before the loop starts. The definite-assignment `!` is honest
+ * here: nothing can read it earlier, because `startLoop` is not called until the await
+ * below has resolved.
+ */
+let textures!: TextureSet;
+
+/**
+ * Load the artwork, then start the engine.
+ *
+ * This is the only asynchronous code in the project. Every texture used to be arithmetic
+ * evaluated at module load; images have to be fetched and decoded, and both are
+ * unavoidably async. Confining it to a single await before the first frame keeps that fact
+ * out of the render path, which stays exactly as synchronous — and as allocation-free — as
+ * it was in Stage 11.
+ *
+ * A failure here is fatal and says so. The alternative, carrying on with missing textures,
+ * produces a black or garbled world and buries the actual cause.
+ */
+async function boot(): Promise<void> {
+  overlay.textContent = 'loading textures…';
+
+  try {
+    textures = await loadTextures();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    overlay.textContent =
+      `Could not start: ${message}\n\n` +
+      `Textures are listed in src/assets/manifest.ts and must be ` +
+      `${VIEW_W === 320 ? '64x64' : 'TEX_SIZE-square'} PNGs in src/assets/images/.`;
+    console.error(error);
+    return;
+  }
+
+  startLoop({
   update(dt) {
     if (keys.wasPressed('Backquote')) setScheme(otherScheme(schemeName));
     if (keys.wasPressed('KeyH')) showHelp = !showHelp;
@@ -335,13 +385,13 @@ startLoop({
     } else {
       // Walls first, recording which pixels they cover, so the floor pass can skip them
       // rather than being painted over.
-      drawWalls(framebuffer, fan.hits, spans, render);
-      drawFloorAndCeiling(framebuffer, player, spans, render);
+      drawWalls(framebuffer, fan.hits, spans, textures, render);
+      drawFloorAndCeiling(framebuffer, player, spans, textures, render);
 
       // Sprites read the wall distances the ray fan already holds, and paint over whatever
       // the first two passes left.
       if (render.sprites) {
-        spriteRenderer.draw(framebuffer, player, map.sprites, fan.hits, render);
+        spriteRenderer.draw(framebuffer, player, map.sprites, fan.hits, textures, render);
       }
 
       // Edge softening is last of the world passes: it blends wall edges against the
@@ -372,4 +422,7 @@ startLoop({
       overlay.textContent = buildOverlay();
     }
   },
-});
+  });
+}
+
+void boot();
