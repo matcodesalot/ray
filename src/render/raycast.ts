@@ -1,6 +1,7 @@
 import type { Player } from '../player';
+import { DoorAxis, type Door } from '../world/doors';
 import type { GameMap } from '../world/map';
-import { isSolidTile } from '../world/tiles';
+import { Tile, isSolidTile } from '../world/tiles';
 
 /**
  * Everything one ray found. Reused between frames rather than reallocated — see RayFan.
@@ -50,6 +51,16 @@ export interface RayHit {
    * faces do not come out mirrored. See the flip in `castRay`.
    */
   wallX: number;
+
+  /**
+   * True when this face is the inside of a doorway — the wall the door is recessed into.
+   *
+   * Because a door sits half a unit inside its cell, the two wall faces beside it are
+   * visible edge-on as a recess. Drawing them with the surrounding wall's texture makes a
+   * doorway look like a hole punched in a wall; giving them their own frame texture is
+   * what makes it read as a door frame.
+   */
+  jamb: boolean;
 }
 
 export function createRayHit(): RayHit {
@@ -63,7 +74,91 @@ export function createRayHit(): RayHit {
     hitX: 0,
     hitY: 0,
     wallX: 0,
+    jamb: false,
   };
+}
+
+/**
+ * Where a ray crosses a door's slab, if it does.
+ *
+ * This is the piece that makes doors more than a toggleable wall. A wall face lies on a
+ * cell boundary, so the DDA lands on it for free. A door's slab lies **half a unit inside
+ * the cell**, so once the ray has entered the cell we have to solve for the crossing
+ * ourselves:
+ *
+ *        cell
+ *     ┌────────────┐
+ *     │            │        the slab is the dashed line at the cell's midpoint;
+ *     ├ ─ ─ ─ ─ ─ ─┤ ← slab the DDA only ever stops at the solid edges, so the
+ *     │      ↗     │        crossing has to be computed directly
+ *     └──────●─────┘
+ *          ray in
+ *
+ * Three ways a ray can fail to hit:
+ *
+ * - It runs parallel to the slab and never reaches the plane.
+ * - It crosses the plane outside this cell — it left through a side first.
+ * - It crosses within the retracted part, which is the actual opening.
+ *
+ * The retracted part is what `openness` measures. The slab is rigid and slides into the
+ * wall, so at openness `o` it occupies the span from `o` to 1, and the material coordinate
+ * at position `u` is `u - o`. Getting that wrong — scaling the texture into the remaining
+ * gap instead of sliding it — gives a door that appears to squash rather than open.
+ */
+function hitDoorSlab(
+  door: Door,
+  posX: number,
+  posY: number,
+  rayDirX: number,
+  rayDirY: number,
+  out: RayHit,
+): boolean {
+  const { cellX, cellY, openness } = door;
+
+  let distance: number;
+  let along: number;
+
+  if (door.axis === DoorAxis.X) {
+    if (rayDirY === 0) return false;
+    distance = (cellY + 0.5 - posY) / rayDirY;
+    if (distance < 0) return false;
+
+    const crossX = posX + rayDirX * distance;
+    if (crossX < cellX || crossX > cellX + 1) return false;
+    along = crossX - cellX;
+  } else {
+    if (rayDirX === 0) return false;
+    distance = (cellX + 0.5 - posX) / rayDirX;
+    if (distance < 0) return false;
+
+    const crossY = posY + rayDirY * distance;
+    if (crossY < cellY || crossY > cellY + 1) return false;
+    along = crossY - cellY;
+  }
+
+  // Through the opening.
+  if (along < openness) return false;
+
+  out.perpDist = distance;
+  out.wallX = along - openness;
+
+  // The slab of an X-axis door faces along y, which is what the renderer calls a y-side.
+  out.side = door.axis === DoorAxis.X ? 1 : 0;
+
+  return true;
+}
+
+/** Fill in the derived fields shared by wall hits and door hits. */
+function finishHit(
+  out: RayHit,
+  posX: number,
+  posY: number,
+  rayDirX: number,
+  rayDirY: number,
+): void {
+  out.hitX = posX + rayDirX * out.perpDist;
+  out.hitY = posY + rayDirY * out.perpDist;
+  out.euclidDist = Math.hypot(out.hitX - posX, out.hitY - posY);
 }
 
 /**
@@ -151,6 +246,9 @@ export function castRay(
 
   let side: 0 | 1 = 0;
 
+  /** The cell we stepped out of, so a wall face can tell it is the side of a doorway. */
+  let previousTile = map.tileAt(mapX, mapY);
+
   // Step to the nearer grid crossing until we enter a solid cell. This needs no iteration
   // cap: GameMap.tileAt reports everything outside the map as solid, so a ray that escapes
   // through a gap still terminates at the edge of the array.
@@ -166,10 +264,32 @@ export function castRay(
     }
 
     const tile = map.tileAt(mapX, mapY);
+
+    if (tile === Tile.Door) {
+      const door = map.doorAt(mapX, mapY);
+
+      if (door && hitDoorSlab(door, posX, posY, rayDirX, rayDirY, out)) {
+        out.tile = tile;
+        out.mapX = mapX;
+        out.mapY = mapY;
+        out.jamb = false;
+        finishHit(out, posX, posY, rayDirX, rayDirY);
+        return out;
+      }
+
+      // Missed the slab: the ray goes through the opening beside it and carries on. This
+      // is the only place the DDA passes *through* a cell it entered.
+      previousTile = tile;
+      continue;
+    }
+
     if (isSolidTile(tile)) {
       out.tile = tile;
+      out.jamb = previousTile === Tile.Door;
       break;
     }
+
+    previousTile = tile;
   }
 
   /**
@@ -185,10 +305,8 @@ export function castRay(
   out.perpDist = side === 0 ? sideDistX - deltaDistX : sideDistY - deltaDistY;
 
   // Since distances are in ray lengths, stepping the ray by perpDist lands on the wall.
-  out.hitX = posX + rayDirX * out.perpDist;
-  out.hitY = posY + rayDirY * out.perpDist;
+  finishHit(out, posX, posY, rayDirX, rayDirY);
 
-  out.euclidDist = Math.hypot(out.hitX - posX, out.hitY - posY);
   out.mapX = mapX;
   out.mapY = mapY;
   out.side = side;

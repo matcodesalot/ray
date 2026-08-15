@@ -9,6 +9,11 @@ import { parseMap } from '../map';
  * gaps between the pillars in the top-left are the useful ones — thin slivers of wall seen
  * at a glancing angle are where off-by-one errors in the DDA show up first.
  *
+ * The three doors are deliberately of both orientations: the two in the pillar rooms lie
+ * along y (you walk through them heading east or west), and the one in the long southern
+ * wall lies along x. A door only renders correctly if its axis is detected from the walls
+ * holding its frame, so having one of each keeps that honest.
+ *
  *   .  floor        # 1 2 3 4  wall variants        D  door        >  spawn, facing east
  */
 export const LEVEL_1 = parseMap(`
@@ -28,7 +33,7 @@ export const LEVEL_1 = parseMap(`
 #....3..#....2....2....#
 #....3..222222....2....#
 #....3............2....#
-#....33333333333333....#
+#....33333D33333333....#
 #......................#
 #.......4444...4444....#
 #.......4.........4....#

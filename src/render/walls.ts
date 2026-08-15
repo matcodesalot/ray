@@ -1,4 +1,4 @@
-import { textureFor } from '../assets/textures';
+import { DOOR_FRAME_TEXTURE, textureFor } from '../assets/textures';
 import { TEX_MASK, TEX_SIZE } from '../config';
 import { LIGHT_UNIT, rgb, shade } from '../engine/color';
 import type { Framebuffer } from '../engine/framebuffer';
@@ -142,7 +142,9 @@ export function drawWalls(
       continue;
     }
 
-    const texture = textureFor(hit.tile).data;
+    // A face the ray reached by passing through a door cell is the inside of the doorway,
+    // so it gets the frame texture rather than whatever the surrounding wall is made of.
+    const texture = (hit.jamb ? DOOR_FRAME_TEXTURE : textureFor(hit.tile)).data;
 
     // Column-major storage means the whole texture column is contiguous from here.
     const texX = ((hit.wallX * TEX_SIZE) | 0) & TEX_MASK;

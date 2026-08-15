@@ -300,6 +300,27 @@ export const WALL_TEXTURES: Readonly<Record<number, Texture>> = {
 };
 
 /**
+ * The inside of a doorway — the recess a door sits within.
+ *
+ * Plain, vertically banded steel, deliberately duller than the door itself. It is seen
+ * edge-on at a glancing angle and only ever a few pixels wide, so anything with detail
+ * turns to noise; what it needs to convey is "this is the *thickness* of the wall", and
+ * vertical banding does that better than any pattern.
+ */
+export const DOOR_FRAME_TEXTURE: Texture = generate((x, y) => {
+  const speckle = hash(x, y, 43) * 10 - 5;
+
+  // Bands running the height of the frame.
+  const band = Math.sin(x * 0.42) * 0.1 + Math.sin(x * 1.31) * 0.04;
+
+  // Darker at the top and bottom so it does not merge with floor and ceiling.
+  const edge = Math.min(y, TEX_SIZE - 1 - y);
+  const cap = edge < 3 ? 0.62 : 1;
+
+  return tint(122, 118, 112, (0.92 + band) * cap, speckle);
+});
+
+/**
  * The floor: small flagstones.
  *
  * Deliberately busier and higher-contrast than the walls. Floor texels are sampled at a

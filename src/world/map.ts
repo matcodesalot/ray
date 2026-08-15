@@ -1,3 +1,4 @@
+import { DoorAxis, DoorSystem, type Door, type DoorSpec } from './doors';
 import { SPAWN_CHARS, TILE_CHARS, Tile, isSolidTile } from './tiles';
 
 export interface Spawn {
@@ -27,11 +28,26 @@ export class GameMap {
 
   readonly spawn: Spawn;
 
-  constructor(width: number, height: number, tiles: Uint8Array, spawn: Spawn) {
+  /** Live door state. Empty for a level with no doors. */
+  readonly doors: DoorSystem;
+
+  constructor(
+    width: number,
+    height: number,
+    tiles: Uint8Array,
+    spawn: Spawn,
+    doors: DoorSystem = new DoorSystem([], width, height),
+  ) {
     this.width = width;
     this.height = height;
     this.tiles = tiles;
     this.spawn = spawn;
+    this.doors = doors;
+  }
+
+  /** The door in a cell, or undefined. */
+  doorAt(cellX: number, cellY: number): Door | undefined {
+    return this.doors.at(cellX, cellY);
   }
 
   /**
@@ -47,9 +63,21 @@ export class GameMap {
     return this.tiles[y * this.width + x]!;
   }
 
-  /** Whether a grid cell blocks movement and stops rays. */
+  /**
+   * Whether a grid cell blocks movement.
+   *
+   * A door cell stops blocking once its door is fully open, which is what lets collision,
+   * unchanged since Stage 8, handle doors without knowing they exist.
+   *
+   * Note this is *movement* solidity, not "does a ray stop here" — a partly open door
+   * blocks movement while letting rays through the gap beside it. The raycaster therefore
+   * asks about tiles directly rather than going through this.
+   */
   isSolid(x: number, y: number): boolean {
-    return isSolidTile(this.tileAt(x, y));
+    const tile = this.tileAt(x, y);
+    if (!isSolidTile(tile)) return false;
+    if (tile === Tile.Door) return this.doors.blocksMovement(x, y);
+    return true;
   }
 }
 
@@ -116,9 +144,45 @@ export function parseMap(source: string): GameMap {
 
   if (!spawn) throw new Error('Map has no spawn marker (one of @ ^ v < >)');
 
-  const map = new GameMap(width, height, tiles, spawn);
+  const doors = collectDoors(tiles, width, height);
+  const map = new GameMap(width, height, tiles, spawn, new DoorSystem(doors, width, height));
   assertEnclosed(map);
   return map;
+}
+
+/**
+ * Work out which way each door lies, from what is holding its frame.
+ *
+ * A door in an east-west wall has solid cells to its east and west, so its slab spans x.
+ * A door with solid cells north and south spans y. Requiring one pair or the other to be
+ * solid is not fussiness: a door in open ground has no wall to slide into and no frame to
+ * be recessed within, and would render as a slab floating in mid-air.
+ */
+function collectDoors(tiles: Uint8Array, width: number, height: number): DoorSpec[] {
+  const solidAt = (x: number, y: number): boolean =>
+    x < 0 || y < 0 || x >= width || y >= height || isSolidTile(tiles[y * width + x]!);
+
+  const specs: DoorSpec[] = [];
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (tiles[y * width + x] !== Tile.Door) continue;
+
+      const heldEastWest = solidAt(x - 1, y) && solidAt(x + 1, y);
+      const heldNorthSouth = solidAt(x, y - 1) && solidAt(x, y + 1);
+
+      if (heldEastWest === heldNorthSouth) {
+        throw new Error(
+          `Door at ${x},${y} needs solid cells on exactly one pair of opposite sides ` +
+            `(east+west or north+south) to form its frame`,
+        );
+      }
+
+      specs.push({ cellX: x, cellY: y, axis: heldEastWest ? DoorAxis.X : DoorAxis.Y });
+    }
+  }
+
+  return specs;
 }
 
 /**

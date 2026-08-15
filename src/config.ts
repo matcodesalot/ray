@@ -81,3 +81,12 @@ export const TEX_MASK = TEX_SIZE - 1;
  * through the seam where two walls meet.
  */
 export const PLAYER_RADIUS = 0.28;
+
+/** Seconds for a door to travel from fully closed to fully open, or back. */
+export const DOOR_TRAVEL_TIME = 0.9;
+
+/** Seconds a door stays fully open before it starts closing itself. */
+export const DOOR_HOLD_TIME = 4;
+
+/** How far in front of the player to look for a door to open, in world units. */
+export const DOOR_REACH = 1.1;

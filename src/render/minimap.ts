@@ -2,6 +2,7 @@ import { rgb } from '../engine/color';
 import type { Framebuffer } from '../engine/framebuffer';
 import type { Player } from '../player';
 import type { GameMap } from '../world/map';
+import { DoorAxis } from '../world/doors';
 import { Tile } from '../world/tiles';
 import type { RayHit } from './raycast';
 
@@ -22,6 +23,7 @@ const COLOR_GRID = rgb(44, 47, 58);
 const COLOR_PLAYER = rgb(255, 214, 64);
 const COLOR_DIR = rgb(255, 255, 255);
 const COLOR_PLANE = rgb(96, 200, 255);
+const COLOR_DOOR = rgb(214, 182, 84);
 const COLOR_RAY_X = rgb(120, 90, 40);
 const COLOR_RAY_Y = rgb(150, 115, 55);
 
@@ -87,6 +89,15 @@ export function drawMap(fb: Framebuffer, map: GameMap, layout: MinimapLayout): v
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
       const tile = map.tileAt(x, y);
+
+      // Doors are drawn as the slab itself rather than a filled cell, so the top-down view
+      // shows how far each one has actually slid. Much the quickest way to tell a door
+      // that is stuck from a door that is rendering wrong.
+      if (tile === Tile.Door) {
+        drawDoor(fb, map, x, y, layout);
+        continue;
+      }
+
       const color = tile === Tile.Floor ? COLOR_FLOOR : (TILE_COLORS[tile] ?? COLOR_FLOOR);
 
       // Round the far edge rather than the size, so cells tile seamlessly at fractional
@@ -110,6 +121,37 @@ export function drawMap(fb: Framebuffer, map: GameMap, layout: MinimapLayout): v
       const sy = Math.round(toScreenY(layout, y));
       fb.drawLine(Math.round(layout.originX), sy, Math.round(toScreenX(layout, map.width)), sy, COLOR_GRID);
     }
+  }
+}
+
+/** Draw one door cell: an empty recess with the slab drawn at its current offset. */
+function drawDoor(
+  fb: Framebuffer,
+  map: GameMap,
+  cellX: number,
+  cellY: number,
+  layout: MinimapLayout,
+): void {
+  const left = Math.round(toScreenX(layout, cellX));
+  const top = Math.round(toScreenY(layout, cellY));
+  const right = Math.round(toScreenX(layout, cellX + 1));
+  const bottom = Math.round(toScreenY(layout, cellY + 1));
+
+  fb.fillRect(left, top, right - left, bottom - top, COLOR_FLOOR);
+
+  const door = map.doorAt(cellX, cellY);
+  if (!door) return;
+
+  const thickness = Math.max(1, Math.round(layout.scale * 0.25));
+
+  if (door.axis === DoorAxis.X) {
+    const slabLeft = Math.round(toScreenX(layout, cellX + door.openness));
+    const centre = Math.round(toScreenY(layout, cellY + 0.5) - thickness / 2);
+    fb.fillRect(slabLeft, centre, right - slabLeft, thickness, COLOR_DOOR);
+  } else {
+    const slabTop = Math.round(toScreenY(layout, cellY + door.openness));
+    const centre = Math.round(toScreenX(layout, cellX + 0.5) - thickness / 2);
+    fb.fillRect(centre, slabTop, thickness, bottom - slabTop, COLOR_DOOR);
   }
 }
 

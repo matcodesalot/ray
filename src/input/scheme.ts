@@ -21,6 +21,14 @@ export interface MoveIntent {
   turnDelta: number;
   /** Whether the run modifier is held. */
   run: boolean;
+
+  /**
+   * Whether the "use" key was pressed this tick — opening doors, and later switches.
+   *
+   * Edge-triggered rather than level-triggered: holding the key should not re-trigger, and
+   * a door that is already open should not be repeatedly re-activated.
+   */
+  use: boolean;
 }
 
 export type SchemeName = 'modern' | 'classic';
@@ -50,7 +58,7 @@ function axis(negative: boolean, positive: boolean): number {
 const MODERN: InputScheme = {
   name: 'modern',
   usesMouseLook: true,
-  help: 'WASD move/strafe · mouse look (click to capture) · Q/E turn · Shift run',
+  help: 'WASD move/strafe · mouse look (click to capture) · Q/E turn · Shift run · Space open',
 
   poll(keys, mouse) {
     return {
@@ -60,6 +68,9 @@ const MODERN: InputScheme = {
       turn: axis(keys.isDown('KeyQ'), keys.isDown('KeyE')),
       turnDelta: mouse.takeDeltaX() * MOUSE_SENSITIVITY,
       run: keys.anyDown('ShiftLeft', 'ShiftRight'),
+      // Space in both schemes: E is already turn-right here, and space is what the
+      // original used anyway.
+      use: keys.wasPressed('Space'),
     };
   },
 };
@@ -75,7 +86,7 @@ const MODERN: InputScheme = {
 const CLASSIC: InputScheme = {
   name: 'classic',
   usesMouseLook: false,
-  help: 'Arrows move/turn · Alt+arrows strafe · Shift run · no mouse look',
+  help: 'Arrows move/turn · Alt+arrows strafe · Shift run · Space open · no mouse look',
 
   poll(keys) {
     const strafing = keys.anyDown('AltLeft', 'AltRight');
@@ -88,6 +99,7 @@ const CLASSIC: InputScheme = {
       turn: strafing ? 0 : axis(left, right),
       turnDelta: 0,
       run: keys.anyDown('ShiftLeft', 'ShiftRight'),
+      use: keys.wasPressed('Space'),
     };
   },
 };

@@ -1,6 +1,8 @@
 import {
   DISPLAY_ASPECT,
+  DOOR_REACH,
   MOVE_SPEED,
+  PLAYER_RADIUS,
   RUN_MULTIPLIER,
   TURN_SPEED,
   VIEW_H,
@@ -91,6 +93,37 @@ function setScheme(name: SchemeName): void {
   if (!SCHEMES[name].usesMouseLook) mouse.release();
 }
 
+/**
+ * Whether the player's body overlaps a cell.
+ *
+ * Doors consult this before closing. Testing the player's *circle* against the cell rather
+ * than just which cell their centre is in matters: standing in a doorway with your centre
+ * barely over the line into the next cell would otherwise let the door shut through you.
+ */
+function playerOccupies(cellX: number, cellY: number): boolean {
+  const nearestX = Math.min(Math.max(player.x, cellX), cellX + 1);
+  const nearestY = Math.min(Math.max(player.y, cellY), cellY + 1);
+  const dx = player.x - nearestX;
+  const dy = player.y - nearestY;
+  return dx * dx + dy * dy < PLAYER_RADIUS * PLAYER_RADIUS;
+}
+
+/**
+ * Open whatever door the player is facing.
+ *
+ * Probing a few points along the view direction rather than casting a ray, because this
+ * only needs to reach about a cell and a half and the ray fan is a render-time thing. The
+ * player's own cell is included so a door you are standing in can be re-triggered, which
+ * refreshes its hold timer.
+ */
+function openDoorInFront(): void {
+  for (const reach of [0, DOOR_REACH * 0.5, DOOR_REACH]) {
+    const cellX = Math.floor(player.x + player.dirX * reach);
+    const cellY = Math.floor(player.y + player.dirY * reach);
+    if (map.doors.activate(cellX, cellY)) return;
+  }
+}
+
 /** Where the upscaled image sits inside the canvas, in device pixels. */
 let viewport = { x: 0, y: 0, w: VIEW_W, h: VIEW_H };
 
@@ -170,6 +203,12 @@ startLoop({
 
     const speed = MOVE_SPEED * (intent.run ? RUN_MULTIPLIER : 1) * dt;
     player.move(forward * speed, strafe * speed, noclip ? undefined : map);
+
+    if (intent.use) openDoorInFront();
+
+    // Doors advance after movement, so the occupancy test sees where the player actually
+    // ended up this tick rather than where they were at the start of it.
+    map.doors.update(dt, playerOccupies);
 
     keys.endTick();
   },
