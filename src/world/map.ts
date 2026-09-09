@@ -1,5 +1,6 @@
 import { EventBus } from '../core/events';
 import { DoorAxis, DoorSystem, type Door, type DoorSpec } from './doors';
+import type { OccupancyTest } from './occupancy';
 import { PushwallSystem, type Pushwall, type PushwallSpec } from './pushwalls';
 import { SPRITE_CHARS, makeEntity, type SpriteEntity } from './entities';
 import { SPAWN_CHARS, TILE_CHARS, Tile, isSolidTile } from './tiles';
@@ -145,12 +146,12 @@ export class GameMap {
    * grid as it goes, and the grid belongs to the map. `isOccupied` is the same callback
    * doors use, and does the same job: nothing slides into a cell you are standing in.
    */
-  updatePushwalls(dt: number, isOccupied: (cellX: number, cellY: number) => boolean): void {
+  updatePushwalls(dt: number, isOccupied: OccupancyTest): void {
     this.pushwalls.update(dt, this.tiles, isOccupied);
   }
 
   /** Advance doors. Here rather than reached for through `map.doors` so both are symmetric. */
-  updateDoors(dt: number, isOccupied: (cellX: number, cellY: number) => boolean): void {
+  updateDoors(dt: number, isOccupied: OccupancyTest): void {
     this.doors.update(dt, isOccupied);
   }
 

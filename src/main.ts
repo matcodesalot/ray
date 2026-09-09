@@ -41,6 +41,7 @@ import { antialiasWallEdges, createWallSpans, drawWalls, type WallSpans } from '
 import { attachDemoBehaviours } from './world/demo-patrol';
 import { SpriteKind, updateEntities } from './world/entities';
 import { LEVEL_1 } from './world/levels/level1';
+import { circleOverlapsBox, type OccupancyTest } from './world/occupancy';
 
 /** Look up a required element, failing loudly rather than propagating a null. */
 function requireElement<T extends Element>(selector: string): T {
@@ -157,23 +158,22 @@ function setResolution(scale: number): void {
 setResolution(RESOLUTION_SCALES[scaleIndex]!);
 
 // ---------------------------------------------------------------------------------------
-// Doors
+// Doors and secrets
 // ---------------------------------------------------------------------------------------
 
 /**
- * Whether the player's body overlaps a cell.
+ * Whether the player's body overlaps a rectangle of the world.
  *
- * Doors consult this before closing. Testing the player's *circle* against the cell rather
- * than just which cell their centre is in matters: standing in a doorway with your centre
- * barely over the line into the next cell would otherwise let the door shut through you.
+ * Consulted by anything that moves on its own before it moves into somewhere. Testing the
+ * player's *circle* rather than just which cell their centre is in matters: standing in a
+ * doorway with your centre barely over the line into the next cell would otherwise let the
+ * door shut through you.
+ *
+ * A rectangle rather than a cell because a pushwall's box is not a cell — see
+ * `world/occupancy.ts`. A door passes its own cell and gets exactly the old behaviour.
  */
-function playerOccupies(cellX: number, cellY: number): boolean {
-  const nearestX = Math.min(Math.max(player.x, cellX), cellX + 1);
-  const nearestY = Math.min(Math.max(player.y, cellY), cellY + 1);
-  const dx = player.x - nearestX;
-  const dy = player.y - nearestY;
-  return dx * dx + dy * dy < PLAYER_RADIUS * PLAYER_RADIUS;
-}
+const playerOccupies: OccupancyTest = (minX, minY, maxX, maxY) =>
+  circleOverlapsBox(player.x, player.y, PLAYER_RADIUS, minX, minY, maxX, maxY);
 
 /**
  * Use whatever is in front of the player: open a door, or shove a secret wall.

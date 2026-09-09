@@ -4,6 +4,7 @@ import { PLAYER_RADIUS as R, PUSHWALL_TRAVEL_TIME } from '../../../src/config';
 import { castRay, createRayHit } from '../../../src/render/raycast';
 import { circleHitsSolid, slideMove } from '../../../src/world/collision';
 import { parseMap } from '../../../src/world/map';
+import { circleOverlapsBox } from '../../../src/world/occupancy';
 import { PushwallSystem } from '../../../src/world/pushwalls';
 import { Tile } from '../../../src/world/tiles';
 
@@ -211,11 +212,9 @@ section('collision agrees with what is drawn');
   const pos = { x: 6.5, y: 2.5 };
   let inside = 0;
   for (let i = 0; i < 600 && wall.moving; i++) {
-    map.updatePushwalls(1 / 60, (cellX, cellY) => {
-      const nearestX = Math.min(Math.max(pos.x, cellX), cellX + 1);
-      const nearestY = Math.min(Math.max(pos.y, cellY), cellY + 1);
-      return (pos.x - nearestX) ** 2 + (pos.y - nearestY) ** 2 < R * R;
-    });
+    map.updatePushwalls(1 / 60, (minX, minY, maxX, maxY) =>
+      circleOverlapsBox(pos.x, pos.y, R, minX, minY, maxX, maxY),
+    );
     slideMove(map, pos, -0.03, 0, R);
     if (circleHitsSolid(map, pos.x, pos.y, R)) inside++;
   }
@@ -231,17 +230,72 @@ section('it will not close on you');
   const wall = map.pushwallAt(3, 2)!;
   map.push(3, 2, 1, 0);
 
-  // Standing in the cell it wants to enter.
-  const occupied = (cellX: number, cellY: number) => cellX === 4 && cellY === 2;
+  // Somebody standing directly in its path, a cell and a half ahead.
+  const blocker = { x: 5, y: 2.5 };
+  const occupied = (minX: number, minY: number, maxX: number, maxY: number) =>
+    circleOverlapsBox(blocker.x, blocker.y, R, minX, minY, maxX, maxY);
+
   for (let i = 0; i < 300; i++) map.updatePushwalls(1 / 60, occupied);
 
-  check('it holds rather than sliding into an occupied cell', wall.travel, 0);
+  check('it stops before it would touch them', wall.travel > 0 && wall.travel < 1, true);
+  near('one radius short, and no further', wall.cellX + wall.travel + 1, blocker.x - R, 1e-2);
   check('and is still on its way', wall.moving, true);
-  check('the cell it wanted stays clear', map.tileAt(4, 2), Tile.Floor);
 
   // Step out of the way and it carries on.
   for (let i = 0; i < 600 && wall.moving; i++) map.updatePushwalls(1 / 60, clear);
   check('once you move, it arrives', [wall.travel, wall.moving], [2, false]);
+}
+
+section('you can follow it in (the bug that was reported)');
+{
+  /**
+   * Pushing a secret and walking after it must not stop it.
+   *
+   * The occupancy question used to be asked about **cells**, which is right for a door — its
+   * slab fills one — and wrong for a pushwall, whose box spans two cells while it travels and
+   * covers only part of each. The moment the wall started moving, the player pressed against
+   * it (the only place you can be when you push it) overlapped a cell the box still partly
+   * covered, and it stopped dead. Worse than a stutter: the hold never released, because the
+   * wall had to move for the player to stop overlapping it and could not.
+   *
+   * The box always travels away from whoever pushed it, so asked geometrically the question
+   * can never be true for the pusher.
+   */
+  const corridorLevel = () =>
+    parseMap(`
+#########
+#.>P....#
+#########
+`);
+
+  const run = (walking: boolean): { travel: number; playerX: number; moving: boolean } => {
+    const map = corridorLevel();
+    const wall = map.pushwallAt(3, 1)!;
+
+    // Pressed right up against the secret, exactly as you are when you use it.
+    const pos = { x: 3 - R, y: 1.5 };
+    map.push(3, 1, 1, 0);
+
+    for (let i = 0; i < 60 * 5; i++) {
+      if (walking) slideMove(map, pos, 0.05, 0, R);
+      map.updatePushwalls(1 / 60, (minX, minY, maxX, maxY) =>
+        circleOverlapsBox(pos.x, pos.y, R, minX, minY, maxX, maxY),
+      );
+    }
+
+    return { travel: wall.travel, playerX: pos.x, moving: wall.moving };
+  };
+
+  const still = run(false);
+  const walking = run(true);
+
+  check('standing still, it travels the full two cells', [still.travel, still.moving], [2, false]);
+  check('and walking after it, it still does', [walking.travel, walking.moving], [2, false]);
+  check('so you end up inside what it opened', walking.playerX > 4, true);
+
+  // The control: with the old cell-shaped question this deadlocked at travel ~0.01, so a
+  // check that only looked at the standing case would have passed throughout.
+  check('the two agree, which is the whole point', still.travel, walking.travel);
 }
 
 section('travel is frame-rate independent');

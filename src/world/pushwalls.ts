@@ -1,5 +1,6 @@
 import { PUSHWALL_CELLS, PUSHWALL_TRAVEL_TIME } from '../config';
 import { SILENT_BUS, WorldEvent, type EventBus } from '../core/events';
+import { NOBODY, type OccupancyTest } from './occupancy';
 import { Tile } from './tiles';
 
 /**
@@ -195,20 +196,23 @@ export class PushwallSystem {
   /**
    * Advance every moving pushwall, and keep the tile grid in step.
    *
-   * `isOccupied` reports whether something is standing in a cell — the same callback doors
-   * use to avoid closing on the player, and used here for the same reason. A pushwall that
-   * is about to cover a cell you are standing in **holds** instead.
+   * `isOccupied` reports whether something is standing inside a rectangle — the same
+   * callback doors use to avoid closing on the player, and used here for the same reason. A
+   * pushwall that is about to cover ground you are standing on **holds** instead.
+   *
+   * The rectangle is the **box at its next position**, not the cells that box touches. Those
+   * are different questions, and asking the cell one was a bug you could feel: the moment
+   * the wall started moving, the player pressed against it — the only place you can be when
+   * you push it — overlapped a cell the box still partly covered, so it stopped dead and
+   * never restarted. Since the box always travels *away* from whoever pushed it, the
+   * geometric question can never be true for the pusher, which is exactly right.
    *
    * Holding rather than reversing is a deliberate difference from doors. Reversing returns
    * a door to the state you asked for, which is helpful; reversing a pushwall would undo a
    * secret you deliberately triggered, and leaning against it would shuffle it back and
    * forth. Waiting preserves the intent and cannot loop.
    */
-  update(
-    dt: number,
-    tiles: Uint8Array,
-    isOccupied: (cellX: number, cellY: number) => boolean,
-  ): void {
+  update(dt: number, tiles: Uint8Array, isOccupied: OccupancyTest = NOBODY): void {
     if (!this.any) return;
 
     const rate = dt / PUSHWALL_TRAVEL_TIME;
@@ -235,27 +239,16 @@ export class PushwallSystem {
     }
   }
 
-  /** Whether the box at a given travel would overlap a cell something is standing in. */
+  /** Whether the box, moved to `travel`, would be standing on top of somebody. */
   private wouldCoverSomething(
     wall: Pushwall,
     travel: number,
-    isOccupied: (cellX: number, cellY: number) => boolean,
+    isOccupied: OccupancyTest,
   ): boolean {
     const x = wall.cellX + wall.dirX * travel;
     const y = wall.cellY + wall.dirY * travel;
 
-    const firstX = Math.floor(x);
-    const firstY = Math.floor(y);
-    const lastX = Math.ceil(x + 1) - 1;
-    const lastY = Math.ceil(y + 1) - 1;
-
-    for (let cellY = firstY; cellY <= lastY; cellY++) {
-      for (let cellX = firstX; cellX <= lastX; cellX++) {
-        if (isOccupied(cellX, cellY)) return true;
-      }
-    }
-
-    return false;
+    return isOccupied(x, y, x + 1, y + 1);
   }
 
   /**

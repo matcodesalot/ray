@@ -1,5 +1,6 @@
 import { DOOR_HOLD_TIME, DOOR_TRAVEL_TIME } from '../config';
 import { SILENT_BUS, WorldEvent, type EventBus } from '../core/events';
+import { NOBODY, type OccupancyTest } from './occupancy';
 
 /**
  * Sliding doors.
@@ -76,6 +77,11 @@ export interface DoorSpec {
  * cell holding an index into the door list, rather than a Map: no hashing, no boxing, and
  * -1 for the overwhelmingly common "not a door" answer.
  */
+/** Ask about a door's whole cell, which is what its slab blocks. */
+function occupiesCell(isOccupied: OccupancyTest, door: Door): boolean {
+  return isOccupied(door.cellX, door.cellY, door.cellX + 1, door.cellY + 1);
+}
+
 export class DoorSystem {
   readonly doors: readonly Door[];
 
@@ -171,12 +177,13 @@ export class DoorSystem {
   /**
    * Advance every door.
    *
-   * `isOccupied` reports whether something is standing in a cell. A door that has finished
-   * waiting will not start closing while the player is in the way, and one that is already
-   * closing reverses — otherwise `blocksMovement` flips to true underneath a player who is
-   * mid-doorway and traps them inside a wall.
+   * `isOccupied` reports whether something is standing inside a world-space rectangle. A
+   * door passes its own cell, because a door's slab blocks the whole of it: a door that has
+   * finished waiting will not start closing while the player is in the way, and one that is
+   * already closing reverses — otherwise `blocksMovement` flips to true underneath a player
+   * who is mid-doorway and traps them inside a wall.
    */
-  update(dt: number, isOccupied: (cellX: number, cellY: number) => boolean): void {
+  update(dt: number, isOccupied: OccupancyTest = NOBODY): void {
     const rate = dt / DOOR_TRAVEL_TIME;
 
     for (const door of this.doors) {
@@ -192,14 +199,14 @@ export class DoorSystem {
 
         case DoorState.Open:
           door.hold -= dt;
-          if (door.hold <= 0 && !isOccupied(door.cellX, door.cellY)) {
+          if (door.hold <= 0 && !occupiesCell(isOccupied, door)) {
             door.state = DoorState.Closing;
             this.events.emit(WorldEvent.DoorClosing, door.cellX + 0.5, door.cellY + 0.5);
           }
           break;
 
         case DoorState.Closing:
-          if (isOccupied(door.cellX, door.cellY)) {
+          if (occupiesCell(isOccupied, door)) {
             // Somebody stepped into the doorway. Back off.
             door.state = DoorState.Opening;
             this.events.emit(WorldEvent.DoorOpening, door.cellX + 0.5, door.cellY + 0.5);

@@ -111,13 +111,36 @@ again — which is what makes this split cost nothing in the overwhelmingly comm
 
 ## It holds; it does not reverse
 
-A door that is closing on you reopens. A pushwall that is about to cover a cell you are
-standing in **stops and waits** instead, and resumes when you move.
+A door that is closing on you reopens. A pushwall that is about to cover ground you are
+standing on **stops and waits** instead, and resumes when you move.
 
 The occupancy rule is the same one doors use — the same callback, even — but the response is
 deliberately different. Reversing returns a door to the state you asked for, which is
 helpful. Reversing a pushwall would undo a secret you had deliberately found, and leaning on
 it would shuffle it back and forth. Waiting preserves the intent and cannot loop.
+
+> **Amended after stage 17, from a bug report.** The first version of this asked the
+> occupancy question about **cells**: "would the box, moved on, touch a cell somebody is
+> standing in?" That is the right question for a door, whose slab fills its cell, and it is
+> the wrong question here for exactly the reason the section above gives — a travelling box
+> spans two cells and covers only part of each.
+>
+> The symptom: push a secret and walk after it, and it stops dead. The player pressed against
+> the wall — the only place you can be when you push it — overlapped a cell the box still
+> partly covered, so the very first tick of travel held. And the hold never released, because
+> the wall had to move for the overlap to end and it could not. A permanent deadlock, one
+> step into the feature.
+>
+> The question is now geometric, matching collision and the renderer: *would the box at its
+> next position overlap this body?* Since the box always travels away from whoever pushed it,
+> that can never be true for the pusher — while somebody standing in its path still stops it,
+> now one radius short of touching them rather than a whole cell early. See
+> [`world/occupancy.ts`](../src/world/occupancy.ts).
+>
+> Worth naming the pattern, because it is the third time in this project: **a coarse test
+> standing in for a fine one is a bug waiting for someone to stand on the boundary.** This
+> document already argued that point about `isSolid` two sections up, and then the code went
+> and made the same mistake in the callback next door.
 
 ---
 
