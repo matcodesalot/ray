@@ -75,6 +75,15 @@ worth naming.
 still outside the x band when it entered the y band, so it came in through a vertical face.
 That is a two-line answer to a question that looks like it needs four cases.
 
+**The cell you are standing in has to be tested too.** The DDA steps *before* it tests, so
+it never examines the starting cell — which for four stages was not merely safe but
+meaningless, since you cannot stand inside a wall. A pushwall breaks that: its box occupies
+part of the cell it has half-left, so a player following it in stands in that cell with the
+box's face between them and the rest of the level. Without a check before the loop the ray
+steps straight over the face, and you can watch the level through a wall you are walking
+into. That one was reported from play too, and its tell was that it only happened while
+*moving toward* the wall — sharing a cell with the face is the only way to trigger it.
+
 **One cell has to own the hit.** The box spans two cells, and the test runs in each cell the
 DDA enters, so without a rule the wall would be drawn twice — once from each side. The rule
 is that a cell claims the crossing only if the crossing lies inside it. Cells are visited in
@@ -141,6 +150,28 @@ it would shuffle it back and forth. Waiting preserves the intent and cannot loop
 > standing in for a fine one is a bug waiting for someone to stand on the boundary.** This
 > document already argued that point about `isSolid` two sections up, and then the code went
 > and made the same mistake in the callback next door.
+
+---
+
+## What both amendments had in common
+
+Two bugs were reported from play after this stage shipped, and they looked unrelated — one
+was a wall that stopped moving, the other a wall you could see through. They have the same
+root, and it is the honest summary of what this stage cost:
+
+**Every other piece of geometry in this engine is aligned to the grid, and four stages of
+code quietly assumed it.** Not in any one place you could point at — in the shape of things.
+The occupancy callback asked about cells because a cell was always the right unit. The DDA
+skipped the starting cell because nothing could ever be in it worth hitting.
+
+Both assumptions were correct for walls, doors and every sprite, and both were invisible
+until a solid surface moved off the grid line. The fixes are small; finding them was not,
+because there was nothing wrong with the code that broke — the code that broke was four
+stages old and had been right the entire time.
+
+The lesson is not "test more". It is that **introducing something that violates a background
+assumption means auditing what depended on it**, and that the assumption is usually not
+written down anywhere, because nobody had ever needed to say it.
 
 ---
 

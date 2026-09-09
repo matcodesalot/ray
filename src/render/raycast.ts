@@ -377,6 +377,34 @@ export function castRay(
   /** The cell we stepped out of, so a wall face can tell it is the side of a doorway. */
   let previousTile = map.tileAt(mapX, mapY);
 
+  /**
+   * The cell we are standing in, which the loop below never tests.
+   *
+   * The loop steps *first* and tests *after*, so the starting cell is skipped — and for
+   * four stages that was not merely safe but meaningless, because you cannot stand inside a
+   * wall. A travelling pushwall broke the assumption without anybody noticing: its box
+   * occupies part of the cell it has half-left, so you can be standing in that cell with the
+   * box's face between you and the rest of the level. The ray would step straight over it
+   * and hit whatever was behind, and you could watch the level through a wall you were
+   * walking into.
+   *
+   * Only pushwalls need this. A door's slab is inside its cell too, but a door cell blocks
+   * movement until it is *fully* open, so you are never standing in one that could stop a
+   * ray.
+   */
+  if (previousTile === Tile.Pushwall) {
+    const wall = map.pushwallAt(mapX, mapY);
+
+    if (wall !== undefined && wall.moving && hitPushwallBox(wall, mapX, mapY, posX, posY, rayDirX, rayDirY, out)) {
+      out.tile = Tile.Pushwall;
+      out.mapX = mapX;
+      out.mapY = mapY;
+      out.jamb = false;
+      finishHit(out, posX, posY, rayDirX, rayDirY);
+      return out;
+    }
+  }
+
   // Step to the nearer grid crossing until we enter a solid cell. This needs no iteration
   // cap: GameMap.tileAt reports everything outside the map as solid, so a ray that escapes
   // through a gap still terminates at the edge of the array.

@@ -298,6 +298,62 @@ section('you can follow it in (the bug that was reported)');
   check('the two agree, which is the whole point', still.travel, walking.travel);
 }
 
+section('you cannot see through a wall you are walking into (the second bug reported)');
+{
+  /**
+   * The DDA steps *before* it tests, so it never examines the cell the ray starts in.
+   *
+   * For four stages that was not merely safe but meaningless: you cannot stand inside a
+   * wall, so the starting cell can never contain anything to hit. A travelling pushwall
+   * quietly broke the assumption. Its box occupies part of the cell it has half-left, so a
+   * player who follows it in stands in that cell with the box's face between them and the
+   * rest of the level — and the ray stepped straight over it into whatever was behind.
+   *
+   * The tell in the original report was that it only happened while *moving toward* it: you
+   * have to be in the same cell as the face, which only happens if you follow the wall.
+   */
+  const map = corridor();
+  const wall = map.pushwallAt(3, 2)!;
+  const body = { x: 3 - R, y: 2.5 };
+  map.push(3, 2, 1, 0);
+
+  const hit = createRayHit();
+  let sawThrough = 0;
+  let sharedCell = 0;
+  let ticks = 0;
+
+  while (wall.moving && ticks < 600) {
+    ticks++;
+    slideMove(map, body, 0.05, 0, R);
+    map.updatePushwalls(1 / 60, (minX, minY, maxX, maxY) =>
+      circleOverlapsBox(body.x, body.y, R, minX, minY, maxX, maxY),
+    );
+
+    const face = PushwallSystem.boxX(wall);
+    if (Math.floor(body.x) === Math.floor(face)) sharedCell++;
+
+    castRay(map, body.x, body.y, 1, 0, hit);
+    if (Math.abs(hit.perpDist - (face - body.x)) > 1e-6) sawThrough++;
+  }
+
+  check(`the ray stops at the box on every tick of the approach (${ticks} ticks)`, sawThrough, 0);
+
+  /**
+   * Not vacuous, twice over: the body has to actually end up sharing a cell with the face —
+   * the only configuration that triggered the bug — and the ray has to be capable of
+   * reaching the far wall when there is nothing in the way.
+   */
+  check(`and it really did share a cell with the face (${sharedCell} ticks)`, sharedCell > 0, true);
+
+  const empty = parseMap(`
+#########
+#.>.....#
+#########
+`);
+  castRay(empty, 2.72, 1.5, 1, 0, hit);
+  check('with no pushwall there, the same ray reaches the far wall', 2.72 + hit.perpDist, 8);
+}
+
 section('travel is frame-rate independent');
 {
   const run = (tick: number) => {
