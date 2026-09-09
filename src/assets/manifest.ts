@@ -54,6 +54,16 @@ export const TEXTURE_MANIFEST = {
     [Tile.Wall3]: wall3,
     [Tile.Wall4]: wall4,
     [Tile.Door]: door,
+
+    /**
+     * A pushwall shares a texture with the walls around it, on purpose.
+     *
+     * It is the whole idea: a secret you can see is not a secret. Give this its own
+     * artwork and every pushwall in every level is marked with a sign saying "push me".
+     * Which wall it should match is a property of where you put it, so changing this is
+     * part of designing a level.
+     */
+    [Tile.Pushwall]: wall4,
   },
 
   /**

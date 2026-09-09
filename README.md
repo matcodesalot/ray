@@ -1,6 +1,6 @@
 # ray
 
-A Wolfenstein 3D–style raycaster in TypeScript, built in fourteen stages you can check out
+A Wolfenstein 3D–style raycaster in TypeScript, built in fifteen stages you can check out
 and run individually.
 
 Everything is drawn by hand into a 320×200 buffer of 32-bit pixels — no WebGL, no canvas
@@ -41,6 +41,7 @@ Each stage is one commit and one tag, with a document explaining what it added a
 | 12 | [image textures](docs/stage-12-image-textures.md) | Loading real PNGs: async boot, a manifest, alpha, orientation |
 | 13 | [blocking sprites](docs/stage-13-blocking-sprites.md) | Objects stop being scenery you walk through |
 | 14 | [directional sprites](docs/stage-14-directional-sprites.md) | Eight-way facing, animation sheets, the behaviour hook |
+| 15 | [pushwalls](docs/stage-15-pushwalls.md) | A whole cell that moves: ray-vs-box, and a solid surface off the grid |
 
 ---
 
@@ -73,6 +74,10 @@ distortion to correct — see [stage 3](docs/stage-03-dda.md).
 number. Wall heights, floor rows, sprite depths and the depth test all share one unit,
 with nothing to convert between them.
 
+**Almost everything is on the grid.** Two things are not, and both had to be solved for
+rather than landed on: a door's slab, half a cell inside its cell, and a
+[pushwall](docs/stage-15-pushwalls.md)'s box, which slides between cells entirely.
+
 **The camera cannot tilt.** That single constraint makes wall columns constant-depth,
 screen rows constant-depth, and billboards indistinguishable from cylinders. Almost every
 shortcut in the renderer traces back to it, and so does every limitation.
@@ -85,13 +90,13 @@ Measured at 320×200, median of 3000 frames, against a 16.67 ms budget:
 
 | pass | time |
 | --- | --- |
-| entity update (behaviour + animation) | 0.001 ms |
-| raycast, 320 rays | 0.013 ms |
-| walls | 0.046 ms |
-| floors and ceilings | 0.092 ms |
-| sprites (20 objects, 3 animated) | 0.001 ms |
+| world update (entities, doors, pushwalls) | 0.001 ms |
+| raycast, 320 rays | 0.014 ms |
+| walls | 0.045 ms |
+| floors and ceilings | 0.093 ms |
+| sprites (20 objects, 3 animated) | 0.002 ms |
 | edge anti-aliasing | 0.007 ms |
-| **full frame** | **0.159 ms** |
+| **full frame** | **0.160 ms** |
 
 Retained heap growth over 300 frames: **0 KB**. Nothing in the render path or the tick
 allocates — the only asynchronous code in the project is the texture load, which runs once
@@ -145,8 +150,7 @@ The monster is third-party CC0 art; everything else is a generated placeholder. 
 
 - **No sloped floors, room-over-room, or looking up and down.** All ruled out by the fixed
   camera height, which is what everything else is built on.
-- **No pushwalls.** The one remaining renderer gap: the DDA assumes a static grid, and a
-  secret wall that slides two cells cannot be expressed in it yet. That is stage 15.
+- **No sound.** That is stage 16.
 - **No combat, enemies, or game logic.** Sprites face and animate, and there is a per-entity
   behaviour hook, but nothing in `src/` decides to attack you. The patrol driver in
   `world/demo-patrol.ts` is a demonstration of the hook and is safe to delete.

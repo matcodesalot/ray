@@ -168,12 +168,26 @@ function playerOccupies(cellX: number, cellY: number): boolean {
   return dx * dx + dy * dy < PLAYER_RADIUS * PLAYER_RADIUS;
 }
 
-/** Open whatever door the player is facing, probing a short way along the view direction. */
-function openDoorInFront(): void {
+/**
+ * Use whatever is in front of the player: open a door, or shove a secret wall.
+ *
+ * One key for both, as in the original, and for a good reason — a pushwall is meant to be
+ * indistinguishable from a wall, so there can be no separate "push" control to reach for.
+ * You find secrets by trying the use key on walls that look promising.
+ *
+ * A pushwall slides along one axis, so the push direction is the player's facing rounded to
+ * a cardinal. Rounding rather than using the raw direction keeps a wall from creeping off
+ * diagonally when you lean on it at an angle.
+ */
+function useInFront(): void {
+  const cardinalX = Math.abs(player.dirX) >= Math.abs(player.dirY) ? Math.sign(player.dirX) : 0;
+  const cardinalY = cardinalX === 0 ? Math.sign(player.dirY) : 0;
+
   for (const reach of [0, DOOR_REACH * 0.5, DOOR_REACH]) {
     const cellX = Math.floor(player.x + player.dirX * reach);
     const cellY = Math.floor(player.y + player.dirY * reach);
     if (map.doors.activate(cellX, cellY)) return;
+    if (map.push(cellX, cellY, cardinalX, cardinalY)) return;
   }
 }
 
@@ -237,7 +251,7 @@ let overlaySince = OVERLAY_INTERVAL;
 
 const HELP = [
   'CONTROLS',
-  '  Space     open door',
+  '  Space     open a door, or push a wall that gives',
   '  `         switch control scheme',
   '  H         close this help',
   '',
@@ -380,11 +394,12 @@ async function boot(): Promise<void> {
     const speed = MOVE_SPEED * (intent.run ? RUN_MULTIPLIER : 1) * dt;
     player.move(forward * speed, strafe * speed, noclip ? undefined : map);
 
-    if (intent.use) openDoorInFront();
+    if (intent.use) useInFront();
 
     // Doors advance after movement, so the occupancy test sees where the player actually
     // ended up this tick rather than where they were at the start of it.
     map.doors.update(dt, playerOccupies);
+    map.updatePushwalls(dt, playerOccupies);
 
     /**
      * Entities: behaviour, then animation, on the fixed timestep.

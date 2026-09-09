@@ -1,5 +1,6 @@
 import { SPRITE_SIZES, type SpriteEntity } from './entities';
 import type { GameMap } from './map';
+import { PushwallSystem } from './pushwalls';
 
 /**
  * Passed where an entity would be, to mean "no entity blocks this move" — only the grid.
@@ -73,6 +74,34 @@ export function circleHitsSolid(
 
       const nearestX = x < cellX ? cellX : x > cellX + 1 ? cellX + 1 : x;
       const nearestY = y < cellY ? cellY : y > cellY + 1 ? cellY + 1 : y;
+
+      const dx = x - nearestX;
+      const dy = y - nearestY;
+      if (dx * dx + dy * dy < radiusSquared) return true;
+    }
+  }
+
+  /**
+   * Pushwalls in motion, tested as boxes rather than as cells.
+   *
+   * The cell loop above deliberately does not report them: a travelling pushwall straddles
+   * two cells, and calling both solid would stop you a whole cell short of a wall you can
+   * see. `GameMap.isSolid` explains the split. The clamp is the same one the cell loop
+   * uses — a unit box is a unit box, wherever its corner happens to be.
+   *
+   * They are geometry, not entities, so `NO_ENTITIES` does not exempt them. Nothing ever
+   * gets to walk through a wall.
+   */
+  const pushwalls = map.pushwalls;
+  if (pushwalls.any) {
+    for (const wall of pushwalls.walls) {
+      if (!wall.moving) continue;
+
+      const boxX = PushwallSystem.boxX(wall);
+      const boxY = PushwallSystem.boxY(wall);
+
+      const nearestX = x < boxX ? boxX : x > boxX + 1 ? boxX + 1 : x;
+      const nearestY = y < boxY ? boxY : y > boxY + 1 ? boxY + 1 : y;
 
       const dx = x - nearestX;
       const dy = y - nearestY;
@@ -202,6 +231,33 @@ function opposingContactNormal(
 
       // Skip surfaces the motion is travelling away from or along. Testing the sign with
       // the un-normalised vector is fine: normalising only scales by a positive length.
+      if (motionX * dx + motionY * dy >= 0) continue;
+
+      if (squared < bestSquared) {
+        bestSquared = squared;
+        bestX = dx;
+        bestY = dy;
+      }
+    }
+  }
+
+  // Moving pushwalls, in the same representation and with the same motion filter as cells.
+  const pushwalls = map.pushwalls;
+  if (pushwalls.any) {
+    for (const wall of pushwalls.walls) {
+      if (!wall.moving) continue;
+
+      const boxX = PushwallSystem.boxX(wall);
+      const boxY = PushwallSystem.boxY(wall);
+
+      const nearestX = x < boxX ? boxX : x > boxX + 1 ? boxX + 1 : x;
+      const nearestY = y < boxY ? boxY : y > boxY + 1 ? boxY + 1 : y;
+
+      const dx = x - nearestX;
+      const dy = y - nearestY;
+      const squared = dx * dx + dy * dy;
+
+      if (squared >= radiusSquared) continue;
       if (motionX * dx + motionY * dy >= 0) continue;
 
       if (squared < bestSquared) {

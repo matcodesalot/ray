@@ -90,3 +90,15 @@ export const DOOR_HOLD_TIME = 4;
 
 /** How far in front of the player to look for a door to open, in world units. */
 export const DOOR_REACH = 1.1;
+
+/**
+ * Seconds a pushwall takes to travel one cell.
+ *
+ * Deliberately slower than a door. A door is something you pass through and stop thinking
+ * about; a pushwall grinding two cells into the dark is the payoff for having found it, and
+ * it wants to be watched.
+ */
+export const PUSHWALL_TRAVEL_TIME = 1.4;
+
+/** How many cells a pushwall travels, if it has the room. Two, as in the original. */
+export const PUSHWALL_CELLS = 2;

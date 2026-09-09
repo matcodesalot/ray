@@ -1,4 +1,5 @@
 import { DoorAxis, DoorSystem, type Door, type DoorSpec } from './doors';
+import { PushwallSystem, type Pushwall, type PushwallSpec } from './pushwalls';
 import { SPRITE_CHARS, makeEntity, type SpriteEntity } from './entities';
 import { SPAWN_CHARS, TILE_CHARS, Tile, isSolidTile } from './tiles';
 
@@ -32,6 +33,9 @@ export class GameMap {
   /** Live door state. Empty for a level with no doors. */
   readonly doors: DoorSystem;
 
+  /** Live pushwall state. Empty for a level with no secrets. */
+  readonly pushwalls: PushwallSystem;
+
   /**
    * Objects standing in the world. Not part of the grid, and deliberately so: a sprite has
    * a position rather than a cell, so two can share a cell and one can stand anywhere.
@@ -45,6 +49,7 @@ export class GameMap {
     spawn: Spawn,
     doors: DoorSystem = new DoorSystem([], width, height),
     sprites: readonly SpriteEntity[] = [],
+    pushwalls: PushwallSystem = new PushwallSystem([], width, height),
   ) {
     this.width = width;
     this.height = height;
@@ -52,11 +57,45 @@ export class GameMap {
     this.spawn = spawn;
     this.doors = doors;
     this.sprites = sprites;
+    this.pushwalls = pushwalls;
   }
 
   /** The door in a cell, or undefined. */
   doorAt(cellX: number, cellY: number): Door | undefined {
     return this.doors.at(cellX, cellY);
+  }
+
+  /** The pushwall currently covering a cell, or undefined. */
+  pushwallAt(cellX: number, cellY: number): Pushwall | undefined {
+    return this.pushwalls.at(cellX, cellY);
+  }
+
+  /**
+   * Push the secret wall in a cell, if there is one and it has anywhere to go.
+   *
+   * The direction is the caller's — it is where the *player* is pushing from, and only
+   * they know that. What the map contributes is which cells are free, since that depends
+   * on walls, doors and other pushwalls all at once.
+   *
+   * Returns false for a cell with no pushwall, so the caller can keep probing further out
+   * exactly as it does for doors.
+   */
+  push(cellX: number, cellY: number, dirX: number, dirY: number): boolean {
+    const wall = this.pushwalls.at(cellX, cellY);
+    if (!wall) return false;
+
+    return this.pushwalls.push(wall, dirX, dirY, (x, y) => !this.isSolid(x, y));
+  }
+
+  /**
+   * Advance secret walls.
+   *
+   * Wrapped here rather than called directly because a moving pushwall rewrites the tile
+   * grid as it goes, and the grid belongs to the map. `isOccupied` is the same callback
+   * doors use, and does the same job: nothing slides into a cell you are standing in.
+   */
+  updatePushwalls(dt: number, isOccupied: (cellX: number, cellY: number) => boolean): void {
+    this.pushwalls.update(dt, this.tiles, isOccupied);
   }
 
   /**
@@ -86,6 +125,23 @@ export class GameMap {
     const tile = this.tileAt(x, y);
     if (!isSolidTile(tile)) return false;
     if (tile === Tile.Door) return this.doors.blocksMovement(x, y);
+
+    /**
+     * A pushwall in motion is deliberately *not* solid at cell granularity.
+     *
+     * Its box straddles two cells, so calling both of them solid would block the player
+     * from up to a whole cell of floor that is plainly empty on screen — you would stop
+     * short of a wall you can see through the gap beside. Collision tests the box itself
+     * instead (see `circleHitsSolid`), which is exact and agrees with what is drawn.
+     *
+     * At rest the box fills exactly one cell, so the cell answer and the box answer are
+     * the same and this is an ordinary wall again.
+     */
+    if (tile === Tile.Pushwall) {
+      const wall = this.pushwalls.at(x, y);
+      return wall === undefined || !wall.moving;
+    }
+
     return true;
   }
 }
@@ -100,6 +156,7 @@ export class GameMap {
  *   #            wall
  *   1 2 3 4      wall variants (different textures later)
  *   D            door (solid for now; opens in Stage 9)
+ *   P            secret pushwall — looks like a wall, slides away when used
  *   ^ v < >      player spawn, facing north / south / west / east
  *   @            player spawn, facing east
  *   b g l c m    sprites: barrel, plant, lamp, column, monster (the cell stays floor)
@@ -123,6 +180,7 @@ export function parseMap(source: string): GameMap {
 
   let spawn: Spawn | null = null;
   const sprites: SpriteEntity[] = [];
+  const pushwalls: PushwallSpec[] = [];
 
   for (let y = 0; y < height; y++) {
     const row = rows[y]!;
@@ -158,6 +216,7 @@ export function parseMap(source: string): GameMap {
       if (tile === undefined) {
         throw new Error(`Unknown map character '${char}' at ${x},${y}`);
       }
+      if (tile === Tile.Pushwall) pushwalls.push({ cellX: x, cellY: y });
       tiles[y * width + x] = tile;
     }
   }
@@ -172,8 +231,10 @@ export function parseMap(source: string): GameMap {
     spawn,
     new DoorSystem(doors, width, height),
     sprites,
+    new PushwallSystem(pushwalls, width, height),
   );
   assertEnclosed(map);
+  assertPushwallsCanMove(map, pushwalls);
   return map;
 }
 
@@ -210,6 +271,25 @@ function collectDoors(tiles: Uint8Array, width: number, height: number): DoorSpe
   }
 
   return specs;
+}
+
+/**
+ * Check every pushwall has somewhere to go.
+ *
+ * A pushwall boxed in on all four sides is not a secret, it is a wall — and an invisible
+ * mistake, because it looks exactly right until a player stands in front of it pressing
+ * the use key and nothing happens. Rejected here for the same reason a door with no frame
+ * is: the failure is silent, and much cheaper to catch at parse time than in play.
+ */
+function assertPushwallsCanMove(map: GameMap, specs: readonly PushwallSpec[]): void {
+  for (const { cellX, cellY } of specs) {
+    const free = PushwallSystem.hasSomewhereToGo(cellX, cellY, (x, y) => !map.isSolid(x, y));
+    if (!free) {
+      throw new Error(
+        `Pushwall at ${cellX},${cellY} is walled in on all four sides and could never move`,
+      );
+    }
+  }
 }
 
 /**

@@ -19,6 +19,7 @@ node/sprite-alpha.ts  sprite compositing maths
 node/renderer.ts      cross-stage regressions: wallX, doors, sprites, orientation, whole frames
 node/collision.ts     circle-vs-grid and circle-vs-entity: contacts, sliding, corners
 node/sprites.ts       sheet slicing, direction selection, animation timing, the behaviour hook
+node/pushwalls.ts     ray-vs-box, grid rewriting, collision agreeing with the render
 browser/images.mjs    the PNGs decode and tile correctly; sheets divide into cells
 browser/loader.mjs    fetch + decode + canvas readback, end to end
 ```
@@ -50,10 +51,16 @@ The pattern: assert what should have happened, not merely that something happene
 real bugs in this project — corners that silently stopped the player, sprites drawn at the
 wrong place off-axis — passed every invariant that only asked "is the state still valid?".
 
-A corollary worth remembering: when a new check fails, suspect the check first. The Stage 13
-sweep reported all 180 approaches frozen because every one of them was aimed at the barrel's
-dead centre, and the Stage 14 render check reported the renderer four cells out because it
-placed every viewer on the wrong side of the monster. Both times the engine was right.
+A corollary worth remembering: **when a new check fails, suspect the check first.** The Stage
+13 sweep reported all 180 approaches frozen because every one of them was aimed at the
+barrel's dead centre. The Stage 14 render check reported the renderer four cells out because
+it placed every viewer on the wrong side of the monster. Fourteen Stage 15 checks failed
+because the test set a pushwall's position directly instead of driving it, leaving the tile
+grid describing where the box used to be. Every time, the engine was right.
+
+The Stage 15 case suggests the general shape: **drive the real API rather than assigning to
+state**. A check that reaches past the code that maintains an invariant is testing a world
+the program cannot be in.
 
 ## Adding a check
 

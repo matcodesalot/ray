@@ -58,7 +58,7 @@ function axis(negative: boolean, positive: boolean): number {
 const MODERN: InputScheme = {
   name: 'modern',
   usesMouseLook: true,
-  help: 'WASD move/strafe · mouse look (click to capture) · Q/E turn · Shift run · Space open',
+  help: 'WASD move/strafe · mouse look (click to capture) · Q/E turn · Shift run · Space open/push',
 
   poll(keys, mouse) {
     return {
@@ -86,7 +86,7 @@ const MODERN: InputScheme = {
 const CLASSIC: InputScheme = {
   name: 'classic',
   usesMouseLook: false,
-  help: 'Arrows move/turn · Alt+arrows strafe · Shift run · Space open · no mouse look',
+  help: 'Arrows move/turn · Alt+arrows strafe · Shift run · Space open/push · no mouse look',
 
   poll(keys) {
     const strafing = keys.anyDown('AltLeft', 'AltRight');

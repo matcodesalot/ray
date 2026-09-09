@@ -110,8 +110,26 @@ export async function loadTextures(): Promise<TextureSet> {
     ([, art]) => typeof art !== 'string',
   ) as [string, { url: string; animations: SpriteSheet['animations'] }][];
 
+  /**
+   * One decode per file, however many slots point at it.
+   *
+   * Aliasing is normal rather than exceptional: a secret pushwall has to share the texture
+   * of the wall it hides among, or it is not a secret. Without this it would fetch, decode
+   * and transpose the same PNG once per slot, and the slots would hold copies that compare
+   * unequal — which is a surprising thing for two names for the same picture to do.
+   */
+  const decoded = new Map<string, Promise<Texture>>();
+  const once = (url: string): Promise<Texture> => {
+    let pending = decoded.get(url);
+    if (!pending) {
+      pending = loadTexture(url);
+      decoded.set(url, pending);
+    }
+    return pending;
+  };
+
   const [loaded, loadedSheets] = await Promise.all([
-    Promise.all(entries.map(([, url]) => loadTexture(url))),
+    Promise.all(entries.map(([, url]) => once(url))),
     Promise.all(sheetEntries.map(([, spec]) => loadSheet(spec))),
   ]);
 

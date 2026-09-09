@@ -40,6 +40,9 @@ const result = await page.evaluate(async () => {
     unknownWallIsMissing: wallTexture(set, 999) === set.missing,
     unknownSpriteIsMissing: spriteTexture(set, 999) === set.missing,
     knownWallIsItself: wallTexture(set, 1) === set.walls[1],
+    // Tile.Pushwall (6) and Tile.Wall4 (4) name the same PNG. A secret that does not match
+    // the wall it hides among is not a secret, and the loader decodes it only once.
+    pushwallSharesWall4: set.walls[6] === set.walls[4],
     /**
      * The sprite sheet, sliced by the loader rather than by the test (Stage 14).
      *
@@ -99,7 +102,8 @@ const result = await page.evaluate(async () => {
 let bad = 0;
 const say = (ok, msg) => { if (!ok) bad++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${msg}`); };
 
-say(result.wallKeys.length === 5, `all 5 wall slots loaded: ${result.wallKeys}`);
+say(result.wallKeys.length === 6, `all 6 wall slots loaded: ${result.wallKeys}`);
+say(result.pushwallSharesWall4, 'the pushwall shares Wall4\'s texture, decoded once');
 say(result.spriteKeys.length === 4, `all 4 sprite slots loaded: ${result.spriteKeys}`);
 for (const [name, t] of Object.entries(result).filter(([, v]) => v && v.size)) {
   say(t.size === 64 && t.len === 4096, `${name}: 64x64, ${t.len} texels`);
