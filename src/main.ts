@@ -10,6 +10,12 @@ import {
 } from './config';
 import { loadTextures } from './assets/loader';
 import { animationTiming } from './assets/decode';
+import { Stride } from './audio/footsteps';
+import { loadSounds } from './audio/loader';
+import { Sound } from './audio/manifest';
+import { Mixer } from './audio/mixer';
+import { connectAudio } from './audio/world-audio';
+import { WorldEvent } from './core/events';
 import type { TextureSet } from './assets/decode';
 import { FpsCounter, startLoop } from './core/loop';
 import { Framebuffer } from './engine/framebuffer';
@@ -252,6 +258,7 @@ let overlaySince = OVERLAY_INTERVAL;
 const HELP = [
   'CONTROLS',
   '  Space     open a door, or push a wall that gives',
+  '  V         mute sound',
   '  `         switch control scheme',
   '  H         close this help',
   '',
@@ -319,20 +326,64 @@ let textures!: TextureSet;
  */
 const behaviourContext = { map, player, seconds: 0 };
 
+/**
+ * The mixer, once the sounds have loaded. Undefined if they could not be.
+ *
+ * Unlike textures, audio failing is **not** fatal. A world with no textures is a black
+ * screen and a bug report; a world with no sound is a world with no sound, and refusing to
+ * start over it would be a worse outcome than playing silently.
+ */
+let mixer: Mixer | undefined;
+
+/** Counts out footsteps by distance covered. */
+const stride = new Stride();
+
 /** Where entity animation timings come from. Hoisted so it is not a fresh closure per tick. */
 const entityTiming = (kind: number, animation: string) => animationTiming(textures, kind, animation);
 
 /**
+ * Bring up sound, and arrange for it to actually start playing.
+ *
+ * Browsers create an `AudioContext` suspended and will not start one except from a user
+ * gesture — an autoplay rule, and a reasonable one. So the context is built and everything
+ * is decoded into it up front, which works fine while suspended, and the first click or key
+ * press resumes it and starts the ambience.
+ *
+ * `{ once: true }` on both listeners: whichever gesture comes first wins and neither fires
+ * again. It is usually the click that captures the mouse.
+ */
+async function startAudio(): Promise<void> {
+  try {
+    const context = new AudioContext();
+    mixer = new Mixer(context, await loadSounds(context));
+  } catch (error) {
+    console.warn('Sound is unavailable, carrying on without it:', error);
+    return;
+  }
+
+  const wake = (): void => {
+    mixer?.resume();
+    if (mixer && !mixer.musicPlaying) mixer.playMusic(Sound.Ambience);
+  };
+
+  window.addEventListener('pointerdown', wake, { once: true });
+  window.addEventListener('keydown', wake, { once: true });
+
+  connectAudio(map.events, mixer, player);
+}
+
+/**
  * Load the artwork, then start the engine.
  *
- * This is the only asynchronous code in the project. Every texture used to be arithmetic
- * evaluated at module load; images have to be fetched and decoded, and both are
+ * This is where the project's asynchronous code lives. Every texture used to be arithmetic
+ * evaluated at module load; images and sounds have to be fetched and decoded, and both are
  * unavoidably async. Confining it to a single await before the first frame keeps that fact
  * out of the render path, which stays exactly as synchronous — and as allocation-free — as
  * it was in Stage 11.
  *
- * A failure here is fatal and says so. The alternative, carrying on with missing textures,
- * produces a black or garbled world and buries the actual cause.
+ * A texture failure here is fatal and says so: carrying on with missing artwork produces a
+ * black or garbled world and buries the actual cause. **Sound is different** — it neither
+ * blocks the first frame nor stops the game if it fails.
  */
 async function boot(): Promise<void> {
   overlay.textContent = 'loading textures…';
@@ -352,6 +403,17 @@ async function boot(): Promise<void> {
     return;
   }
 
+  /**
+   * Sound is started but **not waited for**.
+   *
+   * Textures block the first frame because there is nothing to draw without them. Sound
+   * cannot be missed for the second and a half it takes to fetch and decode a megabyte of
+   * ambience, and blocking on it would mean staring at a loading message for something
+   * optional. It connects itself when it is ready; events emitted before then are simply
+   * not heard by anyone.
+   */
+  void startAudio();
+
   startLoop({
   update(dt) {
     if (keys.wasPressed('Backquote')) setScheme(otherScheme(schemeName));
@@ -363,6 +425,7 @@ async function boot(): Promise<void> {
     if (keys.wasPressed('KeyT')) render.textured = !render.textured;
     if (keys.wasPressed('KeyC')) render.castFloors = !render.castFloors;
     if (keys.wasPressed('KeyP')) render.sprites = !render.sprites;
+    if (keys.wasPressed('KeyV') && mixer) mixer.setMuted(!mixer.isMuted);
     if (keys.wasPressed('KeyX')) render.edgeAntialiasing = !render.edgeAntialiasing;
     if (keys.wasPressed('KeyN')) noclip = !noclip;
 
@@ -392,13 +455,20 @@ async function boot(): Promise<void> {
     }
 
     const speed = MOVE_SPEED * (intent.run ? RUN_MULTIPLIER : 1) * dt;
+
+    const wasX = player.x;
+    const wasY = player.y;
     player.move(forward * speed, strafe * speed, noclip ? undefined : map);
+
+    if (stride.moved(player.x - wasX, player.y - wasY)) {
+      map.events.emit(WorldEvent.Footstep, player.x, player.y);
+    }
 
     if (intent.use) useInFront();
 
     // Doors advance after movement, so the occupancy test sees where the player actually
     // ended up this tick rather than where they were at the start of it.
-    map.doors.update(dt, playerOccupies);
+    map.updateDoors(dt, playerOccupies);
     map.updatePushwalls(dt, playerOccupies);
 
     /**

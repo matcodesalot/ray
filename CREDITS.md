@@ -1,6 +1,7 @@
 # Credits
 
-Everything in this repository is original work except the third-party artwork listed here.
+Everything in this repository is original work except the third-party artwork and sound
+listed here.
 
 ## Artwork
 
@@ -28,6 +29,28 @@ the Doom-era convention of storing five and flipping the rest.
 Only two of the source's animations are used: the four-frame walk (five stored rotations,
 mirrored to eight) and the six-frame death. The sheet also contains attack and pain poses,
 which this engine has nothing to trigger. Re-import with a wider `--rows` to include them.
+
+## Sound
+
+All five sounds are CC0 from OpenGameArt, used **unmodified** — level differences between
+them are corrected by a `gain` in `src/audio/manifest.ts` rather than by editing the files,
+and the fold to mono happens at load time. That keeps the provenance simple: these are the
+files as downloaded.
+
+| file | source | author |
+| --- | --- | --- |
+| `door-open.ogg` (`metal_open_01`) | [100 CC0 metal and wood SFX](https://opengameart.org/content/100-cc0-metal-and-wood-sfx) | rubberduck |
+| `door-close.ogg` (`metal_close_01`) | [100 CC0 metal and wood SFX](https://opengameart.org/content/100-cc0-metal-and-wood-sfx) | rubberduck |
+| `pushwall.ogg` (`stone_door`) | [Stone Door](https://opengameart.org/content/stone-door) | bonebrah |
+| `footstep.ogg` (`stone01`) | [Different steps on wood, stone, leaves, gravel and mud](https://opengameart.org/content/different-steps-on-wood-stone-leaves-gravel-and-mud) | TinyWorlds |
+| `ambience.ogg` (`dungeon002`) | [Dungeon Ambience](https://opengameart.org/content/dungeon-ambience) | yd |
+
+All CC0 1.0 (public domain dedication — no attribution required; credited anyway).
+
+There is no placeholder generator for sound, unlike the artwork. A missing image leaves a
+level you cannot read; a missing sound leaves a level that is quiet, and the loader already
+says so and carries on. Ogg Vorbis is the format because everything except older Safari
+decodes it; see [stage 16](docs/stage-16-audio.md).
 
 ## Everything else
 

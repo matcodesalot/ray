@@ -102,3 +102,28 @@ export const PUSHWALL_TRAVEL_TIME = 1.4;
 
 /** How many cells a pushwall travels, if it has the room. Two, as in the original. */
 export const PUSHWALL_CELLS = 2;
+
+/**
+ * Inside this radius a sound plays at full volume; beyond it, inverse distance takes over.
+ *
+ * Roughly "the same room". Making it much smaller means sounds fall away the moment you
+ * step back from them; much larger and the level stops having any sense of depth.
+ */
+export const AUDIO_REFERENCE_DISTANCE = 1.5;
+
+/** Beyond this many cells a sound is silent and is not played at all. */
+export const AUDIO_MAX_DISTANCE = 14;
+
+/** How many cells before the maximum the volume fades to zero, so the cutoff does not click. */
+export const AUDIO_FADE_BAND = 4;
+
+/**
+ * Softens stereo panning in the near field.
+ *
+ * A source exactly this far to one side is panned halfway rather than hard over. Without it
+ * anything close swings violently between the speakers as you turn.
+ */
+export const AUDIO_PAN_SOFTENING = 0.6;
+
+/** How far the player walks between footsteps, in cells. */
+export const FOOTSTEP_STRIDE = 1.15;

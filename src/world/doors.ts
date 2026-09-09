@@ -1,4 +1,5 @@
 import { DOOR_HOLD_TIME, DOOR_TRAVEL_TIME } from '../config';
+import { SILENT_BUS, WorldEvent, type EventBus } from '../core/events';
 
 /**
  * Sliding doors.
@@ -82,9 +83,21 @@ export class DoorSystem {
   private readonly height: number;
   private readonly byCell: Int32Array;
 
-  constructor(specs: readonly DoorSpec[], width: number, height: number) {
+  /**
+   * Where to announce what happens. Defaults to a bus nobody listens to, so a door system
+   * built without one — as several verification scripts do — needs no null checks.
+   */
+  private readonly events: EventBus;
+
+  constructor(
+    specs: readonly DoorSpec[],
+    width: number,
+    height: number,
+    events: EventBus = SILENT_BUS,
+  ) {
     this.width = width;
     this.height = height;
+    this.events = events;
     this.byCell = new Int32Array(width * height).fill(-1);
 
     const doors: Door[] = [];
@@ -145,6 +158,12 @@ export class DoorSystem {
       return true;
     }
 
+    // Announce only a door that was actually shut, not one already on its way: leaning on
+    // the use key should not restart the sound on every tick.
+    if (door.state !== DoorState.Opening) {
+      this.events.emit(WorldEvent.DoorOpening, door.cellX + 0.5, door.cellY + 0.5);
+    }
+
     door.state = DoorState.Opening;
     return true;
   }
@@ -175,6 +194,7 @@ export class DoorSystem {
           door.hold -= dt;
           if (door.hold <= 0 && !isOccupied(door.cellX, door.cellY)) {
             door.state = DoorState.Closing;
+            this.events.emit(WorldEvent.DoorClosing, door.cellX + 0.5, door.cellY + 0.5);
           }
           break;
 
@@ -182,6 +202,7 @@ export class DoorSystem {
           if (isOccupied(door.cellX, door.cellY)) {
             // Somebody stepped into the doorway. Back off.
             door.state = DoorState.Opening;
+            this.events.emit(WorldEvent.DoorOpening, door.cellX + 0.5, door.cellY + 0.5);
             break;
           }
           door.openness -= rate;

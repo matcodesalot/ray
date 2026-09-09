@@ -20,8 +20,10 @@ node/renderer.ts      cross-stage regressions: wallX, doors, sprites, orientatio
 node/collision.ts     circle-vs-grid and circle-vs-entity: contacts, sliding, corners
 node/sprites.ts       sheet slicing, direction selection, animation timing, the behaviour hook
 node/pushwalls.ts     ray-vs-box, grid rewriting, collision agreeing with the render
+node/audio.ts         attenuation and panning as pure maths, the event bus, footstep cadence
 browser/images.mjs    the PNGs decode and tile correctly; sheets divide into cells
 browser/loader.mjs    fetch + decode + canvas readback, end to end
+browser/audio.mjs     sounds decode; the graph renders offline and lands in the right ear
 ```
 
 The node checks need no browser: `stubDocument()` supplies the handful of DOM calls

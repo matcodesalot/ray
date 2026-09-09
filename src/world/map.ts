@@ -1,3 +1,4 @@
+import { EventBus } from '../core/events';
 import { DoorAxis, DoorSystem, type Door, type DoorSpec } from './doors';
 import { PushwallSystem, type Pushwall, type PushwallSpec } from './pushwalls';
 import { SPRITE_CHARS, makeEntity, type SpriteEntity } from './entities';
@@ -37,6 +38,15 @@ export class GameMap {
   readonly pushwalls: PushwallSystem;
 
   /**
+   * What the world announces as it changes: doors, secrets, footsteps.
+   *
+   * Owned by the map because the map owns the things that emit, and handed to the systems
+   * when they are built rather than reached for later. Audio subscribes to it in `main.ts`;
+   * so could a HUD, a score, or an enemy that hears you.
+   */
+  readonly events: EventBus;
+
+  /**
    * Objects standing in the world. Not part of the grid, and deliberately so: a sprite has
    * a position rather than a cell, so two can share a cell and one can stand anywhere.
    */
@@ -50,6 +60,7 @@ export class GameMap {
     doors: DoorSystem = new DoorSystem([], width, height),
     sprites: readonly SpriteEntity[] = [],
     pushwalls: PushwallSystem = new PushwallSystem([], width, height),
+    events: EventBus = new EventBus(),
   ) {
     this.width = width;
     this.height = height;
@@ -58,6 +69,7 @@ export class GameMap {
     this.doors = doors;
     this.sprites = sprites;
     this.pushwalls = pushwalls;
+    this.events = events;
   }
 
   /** The door in a cell, or undefined. */
@@ -96,6 +108,11 @@ export class GameMap {
    */
   updatePushwalls(dt: number, isOccupied: (cellX: number, cellY: number) => boolean): void {
     this.pushwalls.update(dt, this.tiles, isOccupied);
+  }
+
+  /** Advance doors. Here rather than reached for through `map.doors` so both are symmetric. */
+  updateDoors(dt: number, isOccupied: (cellX: number, cellY: number) => boolean): void {
+    this.doors.update(dt, isOccupied);
   }
 
   /**
@@ -224,14 +241,19 @@ export function parseMap(source: string): GameMap {
   if (!spawn) throw new Error('Map has no spawn marker (one of @ ^ v < >)');
 
   const doors = collectDoors(tiles, width, height);
+
+  // One bus, handed to everything that emits on it.
+  const events = new EventBus();
+
   const map = new GameMap(
     width,
     height,
     tiles,
     spawn,
-    new DoorSystem(doors, width, height),
+    new DoorSystem(doors, width, height, events),
     sprites,
-    new PushwallSystem(pushwalls, width, height),
+    new PushwallSystem(pushwalls, width, height, events),
+    events,
   );
   assertEnclosed(map);
   assertPushwallsCanMove(map, pushwalls);

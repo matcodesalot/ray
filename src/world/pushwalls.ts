@@ -1,4 +1,5 @@
 import { PUSHWALL_CELLS, PUSHWALL_TRAVEL_TIME } from '../config';
+import { SILENT_BUS, WorldEvent, type EventBus } from '../core/events';
 import { Tile } from './tiles';
 
 /**
@@ -89,9 +90,18 @@ export class PushwallSystem {
    */
   private readonly claimed: Int32Array;
 
-  constructor(specs: readonly PushwallSpec[], width: number, height: number) {
+  /** Where to announce a secret opening. See `DoorSystem` for why it defaults to silence. */
+  private readonly events: EventBus;
+
+  constructor(
+    specs: readonly PushwallSpec[],
+    width: number,
+    height: number,
+    events: EventBus = SILENT_BUS,
+  ) {
     this.width = width;
     this.height = height;
+    this.events = events;
     this.byCell = new Int32Array(width * height).fill(-1);
     this.claimed = new Int32Array(specs.length * 2).fill(-1);
 
@@ -168,6 +178,8 @@ export class PushwallSystem {
     wall.dirY = dirY;
     wall.distance = free;
     wall.moving = true;
+
+    this.events.emit(WorldEvent.PushwallStart, wall.cellX + 0.5, wall.cellY + 0.5);
     return true;
   }
 
@@ -209,7 +221,15 @@ export class PushwallSystem {
       if (this.wouldCoverSomething(wall, next, isOccupied)) continue;
 
       wall.travel = next;
-      if (wall.travel >= wall.distance) wall.moving = false;
+
+      if (wall.travel >= wall.distance) {
+        wall.moving = false;
+        this.events.emit(
+          WorldEvent.PushwallStop,
+          PushwallSystem.boxX(wall) + 0.5,
+          PushwallSystem.boxY(wall) + 0.5,
+        );
+      }
 
       this.remark(index, wall, tiles);
     }
