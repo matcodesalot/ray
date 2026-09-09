@@ -110,7 +110,10 @@ export function readRuler(pixel: number): { tx: number; ty: number } {
  * Synthetic on purpose: these checks are about the renderer, and should not start failing
  * because somebody replaced the artwork.
  */
-export function textureSet(fill: (label: string) => Texture): TextureSet {
+export function textureSet(
+  fill: (label: string) => Texture,
+  spriteSheets: TextureSet['spriteSheets'] = {},
+): TextureSet {
   return {
     walls: {
       [Tile.Wall1]: fill('wall1'),
@@ -125,6 +128,7 @@ export function textureSet(fill: (label: string) => Texture): TextureSet {
       [SpriteKind.Lamp]: fill('lamp'),
       [SpriteKind.Column]: fill('column'),
     },
+    spriteSheets,
     doorFrame: fill('doorFrame'),
     floor: fill('floor'),
     ceiling: fill('ceiling'),

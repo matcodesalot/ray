@@ -153,6 +153,11 @@ actually means "you may walk through this", and the verification caught the disa
 `GameMap.isSolid` returns false for a fully open door, and that is the entire integration.
 Stage 8's collision code is untouched and never learns that doors exist.
 
+> **Still true for doors, but no longer the whole story.** Stage 13 made sprites solid, and
+> that could not go through `isSolid` — an entity is not a cell — so `circleHitsSolid` now
+> also sweeps the entity list. Doors remain a pure `isSolid` integration; objects are the
+> exception. See [stage 13](stage-13-blocking-sprites.md).
+
 That works because Stage 8 deliberately used bisection rather than a closed-form contact
 point: bisection asks `circleHitsSolid` what is solid *now*, so a cell that stops being
 solid mid-game needs no special handling. The note in that stage said this would matter

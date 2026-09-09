@@ -14,18 +14,27 @@ import { parseMap } from '../map';
  * wall lies along x. A door only renders correctly if its axis is detected from the walls
  * holding its frame, so having one of each keeps that honest.
  *
+ * The three monsters are the only entities that move. They exist to exercise the Stage 14
+ * directional sprite path — you have to be able to walk round something to tell whether the
+ * eight stored views are in the right order — and they are driven by demo code, not AI.
+ *
+ * The block on the right of the top room hides the level's one secret. From outside it is
+ * four by three cells of solid Wall4; the west face of it has a pushwall in the middle, and
+ * behind that a three-cell alcove that nothing else reaches. Walk up to it and press use.
+ *
  *   .  floor        # 1 2 3 4  wall variants        D  door        >  spawn, facing east
+ *   b g l c  scenery        m  monster        P  secret pushwall
  */
 export const LEVEL_1 = parseMap(`
 ########################
-#......................#
+#...........m..........#
 #..2222...3333....b....#
-#..2..2...3..3.........#
-#..2g.D..l3..3....44...#
-#..2222...3333....44...#
+#..2..2...3..3....4444.#
+#..2g.D..l3..3....P..4.#
+#..2222...3333....4444.#
 #..........c...........#
 #....>........b........#
-#......................#
+#................m.....#
 #..111111.....b........#
 #.......#....222222....#
 #.......#....2.gg.2....#
@@ -34,7 +43,7 @@ export const LEVEL_1 = parseMap(`
 #....3..222222....2....#
 #....3.....l......2....#
 #....33333D33333333....#
-#......................#
+#...m..................#
 #....l..4444...4444..l.#
 #.......4....c....4....#
 #.......4....b....4....#

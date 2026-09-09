@@ -219,6 +219,11 @@ wall, or if `PLAYER_RADIUS` is raised at run time.
 Letting the move through unchecked means you can simply walk out. It is not principled, but
 the failure it replaces is unrecoverable and this one is invisible.
 
+> **Amended in [stage 14](stage-14-directional-sprites.md).** "Already inside geometry" was
+> safe while geometry could not move. Once monsters walk into you it happens constantly, and
+> disabling collision against *everything* let you walk out through a wall. The escape now
+> applies to the grid and the entity list separately: walls never stop blocking.
+
 ---
 
 ## Verification

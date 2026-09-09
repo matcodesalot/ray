@@ -68,6 +68,49 @@ const results = await page.evaluate(async (names) => {
   return out;
 }, NAMES);
 
+/**
+ * Sprite sheets (Stage 14). Same questions as a single sprite, asked of every cell: a sheet
+ * whose bottom-right cell is empty, or whose art drifts up off the feet line in later
+ * frames, loads perfectly and then renders a monster that floats.
+ */
+const SHEETS = ['monster'];
+
+const sheets = await page.evaluate(async (names) => {
+  const out = {};
+  for (const name of names) {
+    const bmp = await createImageBitmap(await (await fetch(`/src/assets/images/${name}.png`)).blob());
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0);
+    const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const alphaAt = (x, y) => d[(y * bmp.width + x) * 4 + 3];
+
+    const columns = bmp.width / 64;
+    const rows = bmp.height / 64;
+    const cells = [];
+
+    for (let row = 0; row < rows; row++) {
+      for (let column = 0; column < columns; column++) {
+        let drawn = 0, clear = 0, lowest = -1, leftmost = 64, rightmost = -1;
+        for (let y = 0; y < 64; y++) {
+          for (let x = 0; x < 64; x++) {
+            if (alphaAt(column * 64 + x, row * 64 + y) === 0) { clear++; continue; }
+            drawn++;
+            if (y > lowest) lowest = y;
+            if (x < leftmost) leftmost = x;
+            if (x > rightmost) rightmost = x;
+          }
+        }
+        cells.push({ row, column, drawn, clear, lowest, leftmost, rightmost });
+      }
+    }
+
+    out[name] = { w: bmp.width, h: bmp.height, columns, rows, cells };
+  }
+  return out;
+}, SHEETS);
+
 let bad = 0;
 const say = (ok, msg) => { if (!ok) bad++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${msg}`); };
 
@@ -96,6 +139,32 @@ console.log('\n--- surfaces: fully opaque ---');
 for (const n of NAMES) {
   if (SPRITES.has(n)) continue;
   say(results[n].clear === 0 && results[n].partial === 0, `${n}: no transparency (${results[n].opaque} opaque)`);
+}
+
+console.log('\n--- sheets: an even grid of cells, every one drawn and standing on its feet ---');
+for (const n of SHEETS) {
+  const s = sheets[n];
+  say(s.w % 64 === 0 && s.h % 64 === 0, `${n}: ${s.w}x${s.h} divides into 64px cells (${s.columns}x${s.rows})`);
+  say(s.columns === 8, `${n}: eight columns, one per stored direction`);
+
+  const empty = s.cells.filter((c) => c.drawn === 0);
+  say(empty.length === 0, `${n}: every cell has art (${empty.length} empty)`);
+
+  // Feet on or near the bottom edge. A tolerance because death frames legitimately end up
+  // as a heap that is a couple of rows shallower than the standing pose.
+  const floating = s.cells.filter((c) => c.lowest < 58);
+  say(floating.length === 0, `${n}: every cell reaches the feet line (${floating.length} floating)`);
+
+  const bleeding = s.cells.filter((c) => c.leftmost === 0 || c.rightmost === 63);
+  say(bleeding.length === 0, `${n}: nothing touches a cell's side edges (${bleeding.length} would bleed into its neighbour)`);
+
+  const solid = s.cells.filter((c) => c.clear === 0);
+  say(solid.length === 0, `${n}: every cell has a transparent margin (${solid.length} fully opaque)`);
+
+  // The whole point of a directional sheet: the eight views must actually differ. Compare
+  // silhouette widths across one row — identical columns mean the import collapsed them.
+  const widths = new Set(s.cells.filter((c) => c.row === 0).map((c) => c.rightmost - c.leftmost));
+  say(widths.size > 1, `${n}: the eight directions are not all the same silhouette (${widths.size} distinct widths)`);
 }
 
 console.log(`\n${bad === 0 ? 'all checks passed' : `${bad} FAILED`}`);

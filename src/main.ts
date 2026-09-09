@@ -9,6 +9,13 @@ import {
   VIEW_W,
 } from './config';
 import { loadTextures } from './assets/loader';
+import { animationTiming } from './assets/decode';
+import { Stride } from './audio/footsteps';
+import { loadSounds } from './audio/loader';
+import { Sound } from './audio/manifest';
+import { Mixer } from './audio/mixer';
+import { connectAudio } from './audio/world-audio';
+import { WorldEvent } from './core/events';
 import type { TextureSet } from './assets/decode';
 import { FpsCounter, startLoop } from './core/loop';
 import { Framebuffer } from './engine/framebuffer';
@@ -27,10 +34,14 @@ import {
   type Rect,
 } from './render/minimap';
 import { DEFAULT_RENDER_OPTIONS } from './render/options';
+import { OverlayStack } from './render/overlay';
 import { RayFan } from './render/raycast';
 import { SpriteRenderer } from './render/sprites';
 import { antialiasWallEdges, createWallSpans, drawWalls, type WallSpans } from './render/walls';
+import { attachDemoBehaviours } from './world/demo-patrol';
+import { SpriteKind, updateEntities } from './world/entities';
 import { LEVEL_1 } from './world/levels/level1';
+import { circleOverlapsBox, type OccupancyTest } from './world/occupancy';
 
 /** Look up a required element, failing loudly rather than propagating a null. */
 function requireElement<T extends Element>(selector: string): T {
@@ -147,30 +158,43 @@ function setResolution(scale: number): void {
 setResolution(RESOLUTION_SCALES[scaleIndex]!);
 
 // ---------------------------------------------------------------------------------------
-// Doors
+// Doors and secrets
 // ---------------------------------------------------------------------------------------
 
 /**
- * Whether the player's body overlaps a cell.
+ * Whether the player's body overlaps a rectangle of the world.
  *
- * Doors consult this before closing. Testing the player's *circle* against the cell rather
- * than just which cell their centre is in matters: standing in a doorway with your centre
- * barely over the line into the next cell would otherwise let the door shut through you.
+ * Consulted by anything that moves on its own before it moves into somewhere. Testing the
+ * player's *circle* rather than just which cell their centre is in matters: standing in a
+ * doorway with your centre barely over the line into the next cell would otherwise let the
+ * door shut through you.
+ *
+ * A rectangle rather than a cell because a pushwall's box is not a cell — see
+ * `world/occupancy.ts`. A door passes its own cell and gets exactly the old behaviour.
  */
-function playerOccupies(cellX: number, cellY: number): boolean {
-  const nearestX = Math.min(Math.max(player.x, cellX), cellX + 1);
-  const nearestY = Math.min(Math.max(player.y, cellY), cellY + 1);
-  const dx = player.x - nearestX;
-  const dy = player.y - nearestY;
-  return dx * dx + dy * dy < PLAYER_RADIUS * PLAYER_RADIUS;
-}
+const playerOccupies: OccupancyTest = (minX, minY, maxX, maxY) =>
+  circleOverlapsBox(player.x, player.y, PLAYER_RADIUS, minX, minY, maxX, maxY);
 
-/** Open whatever door the player is facing, probing a short way along the view direction. */
-function openDoorInFront(): void {
+/**
+ * Use whatever is in front of the player: open a door, or shove a secret wall.
+ *
+ * One key for both, as in the original, and for a good reason — a pushwall is meant to be
+ * indistinguishable from a wall, so there can be no separate "push" control to reach for.
+ * You find secrets by trying the use key on walls that look promising.
+ *
+ * A pushwall slides along one axis, so the push direction is the player's facing rounded to
+ * a cardinal. Rounding rather than using the raw direction keeps a wall from creeping off
+ * diagonally when you lean on it at an angle.
+ */
+function useInFront(): void {
+  const cardinalX = Math.abs(player.dirX) >= Math.abs(player.dirY) ? Math.sign(player.dirX) : 0;
+  const cardinalY = cardinalX === 0 ? Math.sign(player.dirY) : 0;
+
   for (const reach of [0, DOOR_REACH * 0.5, DOOR_REACH]) {
     const cellX = Math.floor(player.x + player.dirX * reach);
     const cellY = Math.floor(player.y + player.dirY * reach);
     if (map.doors.activate(cellX, cellY)) return;
+    if (map.push(cellX, cellY, cardinalX, cardinalY)) return;
   }
 }
 
@@ -234,7 +258,8 @@ let overlaySince = OVERLAY_INTERVAL;
 
 const HELP = [
   'CONTROLS',
-  '  Space     open door',
+  '  Space     open a door, or push a wall that gives',
+  '  V         mute sound',
   '  `         switch control scheme',
   '  H         close this help',
   '',
@@ -294,22 +319,90 @@ function buildOverlay(): string {
 let textures!: TextureSet;
 
 /**
+ * Reused between ticks, like everything else on the hot path.
+ *
+ * A fresh context object each tick would be a few dozen bytes sixty times a second — not a
+ * problem in itself, but the project's claim is that a steady frame allocates nothing at
+ * all, and that claim is only worth making if it stays true.
+ */
+const behaviourContext = { map, player, seconds: 0 };
+
+/**
+ * Passes that draw over the finished world: a HUD, a weapon, a damage flash.
+ *
+ * Empty, because this is an engine and not a game. It exists so there is one obvious place
+ * to attach those things, and so that place is *after* the world and *before* the frame is
+ * presented — see docs/extending.md.
+ */
+const overlays = new OverlayStack();
+
+/**
+ * The mixer, once the sounds have loaded. Undefined if they could not be.
+ *
+ * Unlike textures, audio failing is **not** fatal. A world with no textures is a black
+ * screen and a bug report; a world with no sound is a world with no sound, and refusing to
+ * start over it would be a worse outcome than playing silently.
+ */
+let mixer: Mixer | undefined;
+
+/** Counts out footsteps by distance covered. */
+const stride = new Stride();
+
+/** Where entity animation timings come from. Hoisted so it is not a fresh closure per tick. */
+const entityTiming = (kind: number, animation: string) => animationTiming(textures, kind, animation);
+
+/**
+ * Bring up sound, and arrange for it to actually start playing.
+ *
+ * Browsers create an `AudioContext` suspended and will not start one except from a user
+ * gesture — an autoplay rule, and a reasonable one. So the context is built and everything
+ * is decoded into it up front, which works fine while suspended, and the first click or key
+ * press resumes it and starts the ambience.
+ *
+ * `{ once: true }` on both listeners: whichever gesture comes first wins and neither fires
+ * again. It is usually the click that captures the mouse.
+ */
+async function startAudio(): Promise<void> {
+  try {
+    const context = new AudioContext();
+    mixer = new Mixer(context, await loadSounds(context));
+  } catch (error) {
+    console.warn('Sound is unavailable, carrying on without it:', error);
+    return;
+  }
+
+  const wake = (): void => {
+    mixer?.resume();
+    if (mixer && !mixer.musicPlaying) mixer.playMusic(Sound.Ambience);
+  };
+
+  window.addEventListener('pointerdown', wake, { once: true });
+  window.addEventListener('keydown', wake, { once: true });
+
+  connectAudio(map.events, mixer, player);
+}
+
+/**
  * Load the artwork, then start the engine.
  *
- * This is the only asynchronous code in the project. Every texture used to be arithmetic
- * evaluated at module load; images have to be fetched and decoded, and both are
+ * This is where the project's asynchronous code lives. Every texture used to be arithmetic
+ * evaluated at module load; images and sounds have to be fetched and decoded, and both are
  * unavoidably async. Confining it to a single await before the first frame keeps that fact
  * out of the render path, which stays exactly as synchronous — and as allocation-free — as
  * it was in Stage 11.
  *
- * A failure here is fatal and says so. The alternative, carrying on with missing textures,
- * produces a black or garbled world and buries the actual cause.
+ * A texture failure here is fatal and says so: carrying on with missing artwork produces a
+ * black or garbled world and buries the actual cause. **Sound is different** — it neither
+ * blocks the first frame nor stops the game if it fails.
  */
 async function boot(): Promise<void> {
   overlay.textContent = 'loading textures…';
 
   try {
     textures = await loadTextures();
+    // Demo only. Removing this line, and the file it comes from, leaves the engine intact
+    // and the monsters standing still. See src/world/demo-patrol.ts.
+    attachDemoBehaviours(map, SpriteKind.Monster);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     overlay.textContent =
@@ -319,6 +412,17 @@ async function boot(): Promise<void> {
     console.error(error);
     return;
   }
+
+  /**
+   * Sound is started but **not waited for**.
+   *
+   * Textures block the first frame because there is nothing to draw without them. Sound
+   * cannot be missed for the second and a half it takes to fetch and decode a megabyte of
+   * ambience, and blocking on it would mean staring at a loading message for something
+   * optional. It connects itself when it is ready; events emitted before then are simply
+   * not heard by anyone.
+   */
+  void startAudio();
 
   startLoop({
   update(dt) {
@@ -331,6 +435,7 @@ async function boot(): Promise<void> {
     if (keys.wasPressed('KeyT')) render.textured = !render.textured;
     if (keys.wasPressed('KeyC')) render.castFloors = !render.castFloors;
     if (keys.wasPressed('KeyP')) render.sprites = !render.sprites;
+    if (keys.wasPressed('KeyV') && mixer) mixer.setMuted(!mixer.isMuted);
     if (keys.wasPressed('KeyX')) render.edgeAntialiasing = !render.edgeAntialiasing;
     if (keys.wasPressed('KeyN')) noclip = !noclip;
 
@@ -360,13 +465,31 @@ async function boot(): Promise<void> {
     }
 
     const speed = MOVE_SPEED * (intent.run ? RUN_MULTIPLIER : 1) * dt;
+
+    const wasX = player.x;
+    const wasY = player.y;
     player.move(forward * speed, strafe * speed, noclip ? undefined : map);
 
-    if (intent.use) openDoorInFront();
+    if (stride.moved(player.x - wasX, player.y - wasY)) {
+      map.events.emit(WorldEvent.Footstep, player.x, player.y);
+    }
+
+    if (intent.use) useInFront();
 
     // Doors advance after movement, so the occupancy test sees where the player actually
     // ended up this tick rather than where they were at the start of it.
-    map.doors.update(dt, playerOccupies);
+    map.updateDoors(dt, playerOccupies);
+    map.updatePushwalls(dt, playerOccupies);
+
+    /**
+     * Entities: behaviour, then animation, on the fixed timestep.
+     *
+     * In `update` rather than `render` on purpose. Animation driven off the render loop
+     * runs at whatever rate the display happens to refresh at — a walk cycle would be
+     * twice as fast on a 120 Hz monitor — which is the same reason door travel is here.
+     */
+    behaviourContext.seconds = dt;
+    updateEntities(map.sprites, behaviourContext, entityTiming);
 
     overlaySince += dt;
     keys.endTick();
@@ -407,6 +530,9 @@ async function boot(): Promise<void> {
         drawPlayer(framebuffer, player, layout);
       }
     }
+
+    // The game's own drawing: after everything with a position, before the frame goes out.
+    overlays.draw(framebuffer, player, render);
 
     if (needsClear) {
       ctx.fillStyle = '#000';

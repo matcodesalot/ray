@@ -27,6 +27,15 @@ export const Tile = {
    * sliding animation and the half-cell recess that makes doors sit inside the wall line.
    */
   Door: 5,
+
+  /**
+   * A secret pushwall: an ordinary-looking wall that slides away when you use it.
+   *
+   * Unlike every other tile this one is written to the grid at run time as well as read
+   * from it — a moving pushwall marks the cells its box currently covers, and clears the
+   * ones it has left. See `world/pushwalls.ts`.
+   */
+  Pushwall: 6,
 } as const;
 
 export type Tile = (typeof Tile)[keyof typeof Tile];
@@ -47,6 +56,7 @@ export const TILE_CHARS: Readonly<Record<string, Tile>> = {
   '3': Tile.Wall3,
   '4': Tile.Wall4,
   D: Tile.Door,
+  P: Tile.Pushwall,
 };
 
 /** Spawn markers, and the direction each one faces. */

@@ -1,6 +1,7 @@
 import type { Player } from '../player';
 import { DoorAxis, type Door } from '../world/doors';
 import type { GameMap } from '../world/map';
+import type { Pushwall } from '../world/pushwalls';
 import { Tile, isSolidTile } from '../world/tiles';
 
 /**
@@ -162,6 +163,119 @@ function hitDoorSlab(
   return true;
 }
 
+/**
+ * How far outside a cell a box hit may land and still be claimed by that cell.
+ *
+ * The test below runs in every cell the box touches, and a hit exactly on the shared
+ * boundary belongs to both. Being generous is safe because the cells are visited in ray
+ * order and the first claim wins, which is the nearer one; being strict is not, because a
+ * hit that neither cell claims is a hole in a solid wall.
+ */
+const CLAIM_EPSILON = 1e-9;
+
+/**
+ * Where a ray crosses a moving pushwall's box, if it does.
+ *
+ * A door's slab is a plane at a known coordinate, so one division finds the crossing. A
+ * pushwall is a **box** at a fractional offset, and a ray can enter it through any of four
+ * faces, so this is the standard slab intersection: clip the ray against the x band and the
+ * y band, and if what is left is a non-empty interval, the ray is inside the box over it.
+ *
+ *      x band          the ray is inside the box between max(nearX, nearY)
+ *    ├────────┤        and min(farX, farY). An empty interval means it passed
+ *    ┌────────┐        the box by, going through one band and out of the other.
+ *  ──┼────────┼──  y band
+ *    └────────┘
+ *
+ * The face struck is whichever band was entered *last* — the one whose near plane the ray
+ * was still outside of. That is what makes this a two-line answer to a question that looks
+ * like it needs four cases.
+ *
+ * `cellX, cellY` is the cell the DDA is currently in. The box straddles two cells while it
+ * travels, so without checking that the crossing lies in this cell it would be drawn twice,
+ * once from each of them — the nearer answer being the one the ray reaches first.
+ */
+function hitPushwallBox(
+  wall: Pushwall,
+  cellX: number,
+  cellY: number,
+  posX: number,
+  posY: number,
+  rayDirX: number,
+  rayDirY: number,
+  out: RayHit,
+): boolean {
+  const boxX = wall.cellX + wall.dirX * wall.travel;
+  const boxY = wall.cellY + wall.dirY * wall.travel;
+
+  /**
+   * A ray parallel to a band is either inside it forever or outside it forever.
+   *
+   * Worth the branch rather than leaning on Infinity as the DDA does: here the numerator
+   * can be zero at the same time as the denominator, and `0 / 0` is NaN, which loses every
+   * comparison below and would silently report a miss.
+   */
+  let nearX = -Infinity;
+  let farX = Infinity;
+  if (rayDirX !== 0) {
+    const a = (boxX - posX) / rayDirX;
+    const b = (boxX + 1 - posX) / rayDirX;
+    nearX = a < b ? a : b;
+    farX = a < b ? b : a;
+  } else if (posX < boxX || posX > boxX + 1) {
+    return false;
+  }
+
+  let nearY = -Infinity;
+  let farY = Infinity;
+  if (rayDirY !== 0) {
+    const a = (boxY - posY) / rayDirY;
+    const b = (boxY + 1 - posY) / rayDirY;
+    nearY = a < b ? a : b;
+    farY = a < b ? b : a;
+  } else if (posY < boxY || posY > boxY + 1) {
+    return false;
+  }
+
+  const enter = nearX > nearY ? nearX : nearY;
+  const exit = farX < farY ? farX : farY;
+
+  // Missed it, it is behind us, or we are standing inside it — which has no face to draw.
+  if (enter > exit || enter < 0) return false;
+
+  const hitX = posX + rayDirX * enter;
+  const hitY = posY + rayDirY * enter;
+
+  if (
+    hitX < cellX - CLAIM_EPSILON ||
+    hitX > cellX + 1 + CLAIM_EPSILON ||
+    hitY < cellY - CLAIM_EPSILON ||
+    hitY > cellY + 1 + CLAIM_EPSILON
+  ) {
+    return false;
+  }
+
+  const side: 0 | 1 = nearX > nearY ? 0 : 1;
+  out.perpDist = enter;
+  out.side = side;
+
+  /**
+   * The texture coordinate, measured from the **box**, not from the cell.
+   *
+   * This is the same distinction a door makes when it slides: the material moves with the
+   * wall. Measuring from the cell instead would leave the texture pinned to the world while
+   * the wall slid across it, so a brick pattern would appear to flow through the stone.
+   *
+   * The flip is the wall rule unchanged — it has to agree with which way the camera plane
+   * points when you are looking at that face, or the artwork reads mirrored.
+   */
+  let wallX = side === 0 ? hitY - boxY : hitX - boxX;
+  if ((side === 0 && rayDirX < 0) || (side === 1 && rayDirY > 0)) wallX = 1 - wallX;
+  out.wallX = wallX < 0 ? 0 : wallX > 1 ? 1 : wallX;
+
+  return true;
+}
+
 /** Fill in the derived fields shared by wall hits and door hits. */
 function finishHit(
   out: RayHit,
@@ -263,6 +377,34 @@ export function castRay(
   /** The cell we stepped out of, so a wall face can tell it is the side of a doorway. */
   let previousTile = map.tileAt(mapX, mapY);
 
+  /**
+   * The cell we are standing in, which the loop below never tests.
+   *
+   * The loop steps *first* and tests *after*, so the starting cell is skipped — and for
+   * four stages that was not merely safe but meaningless, because you cannot stand inside a
+   * wall. A travelling pushwall broke the assumption without anybody noticing: its box
+   * occupies part of the cell it has half-left, so you can be standing in that cell with the
+   * box's face between you and the rest of the level. The ray would step straight over it
+   * and hit whatever was behind, and you could watch the level through a wall you were
+   * walking into.
+   *
+   * Only pushwalls need this. A door's slab is inside its cell too, but a door cell blocks
+   * movement until it is *fully* open, so you are never standing in one that could stop a
+   * ray.
+   */
+  if (previousTile === Tile.Pushwall) {
+    const wall = map.pushwallAt(mapX, mapY);
+
+    if (wall !== undefined && wall.moving && hitPushwallBox(wall, mapX, mapY, posX, posY, rayDirX, rayDirY, out)) {
+      out.tile = Tile.Pushwall;
+      out.mapX = mapX;
+      out.mapY = mapY;
+      out.jamb = false;
+      finishHit(out, posX, posY, rayDirX, rayDirY);
+      return out;
+    }
+  }
+
   // Step to the nearer grid crossing until we enter a solid cell. This needs no iteration
   // cap: GameMap.tileAt reports everything outside the map as solid, so a ray that escapes
   // through a gap still terminates at the edge of the array.
@@ -291,10 +433,38 @@ export function castRay(
         return out;
       }
 
-      // Missed the slab: the ray goes through the opening beside it and carries on. This
-      // is the only place the DDA passes *through* a cell it entered.
+      // Missed the slab: the ray goes through the opening beside it and carries on. Until
+      // Stage 15 this was the only place the DDA passed *through* a cell it entered; a
+      // travelling pushwall is the other, and for the same reason — the solid part of the
+      // cell is no longer the whole cell.
       previousTile = tile;
       continue;
+    }
+
+    if (tile === Tile.Pushwall) {
+      const wall = map.pushwallAt(mapX, mapY);
+
+      if (wall !== undefined && wall.moving) {
+        if (hitPushwallBox(wall, mapX, mapY, posX, posY, rayDirX, rayDirY, out)) {
+          out.tile = tile;
+          out.mapX = mapX;
+          out.mapY = mapY;
+          out.jamb = false;
+          finishHit(out, posX, posY, rayDirX, rayDirY);
+          return out;
+        }
+
+        // The box is elsewhere in this cell: the ray goes past it through the part of the
+        // cell it has vacated, exactly as it does through the opening beside a door.
+        previousTile = tile;
+        continue;
+      }
+
+      // At rest the box fills its cell exactly, which is an ordinary wall face and the DDA
+      // has already landed on it.
+      out.tile = tile;
+      out.jamb = previousTile === Tile.Door;
+      break;
     }
 
     if (isSolidTile(tile)) {
@@ -349,6 +519,56 @@ export function castRay(
   out.wallX = wallX;
 
   return out;
+}
+
+/**
+ * Reused by `lineOfSight`, which is called from game logic rather than the render loop and
+ * has no fan of its own to write into.
+ */
+const sightHit = createRayHit();
+
+/**
+ * Can something at one point see something at another?
+ *
+ * The same DDA that answers "what does this screen column see" answers "can the guard see
+ * the player", and that is worth noticing: a raycaster's central routine is a *visibility*
+ * query, and the renderer is only its most demanding customer. A game needs this for sight,
+ * for hitscan weapons, and for anything that should not work through a wall.
+ *
+ * ## The one trap
+ *
+ * `RayHit.perpDist` is measured in **ray lengths** — multiples of the direction vector it
+ * was given. The renderer exploits that by passing an unnormalised direction whose
+ * component along the view axis is exactly 1, which is what makes distances perpendicular
+ * for free and needs no fisheye correction.
+ *
+ * Here the direction is **normalised**, so one ray length is one world unit and `perpDist`
+ * is a plain distance you can compare against `Math.hypot`. Pass an unnormalised direction
+ * and this still returns a boolean, still looks reasonable, and is wrong by whatever the
+ * length happened to be.
+ *
+ * Doors and pushwalls need no special handling: the DDA already stops at a closed door's
+ * slab and passes through an open one, so a guard can see you through a doorway exactly
+ * when you can see them.
+ */
+export function lineOfSight(
+  map: GameMap,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+): boolean {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+
+  const distance = Math.hypot(dx, dy);
+  if (distance < 1e-9) return true; // same point: trivially visible, and no direction to cast
+
+  castRay(map, fromX, fromY, dx / distance, dy / distance, sightHit);
+
+  // Strictly greater: a wall exactly at the target means the target is *in* the wall, and
+  // the surface is what you can see rather than the thing behind it.
+  return sightHit.perpDist >= distance;
 }
 
 /**

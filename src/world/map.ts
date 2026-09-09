@@ -1,5 +1,8 @@
+import { EventBus } from '../core/events';
 import { DoorAxis, DoorSystem, type Door, type DoorSpec } from './doors';
-import { SPRITE_CHARS, type SpriteEntity } from './entities';
+import type { OccupancyTest } from './occupancy';
+import { PushwallSystem, type Pushwall, type PushwallSpec } from './pushwalls';
+import { SPRITE_CHARS, makeEntity, type SpriteEntity } from './entities';
 import { SPAWN_CHARS, TILE_CHARS, Tile, isSolidTile } from './tiles';
 
 export interface Spawn {
@@ -32,11 +35,27 @@ export class GameMap {
   /** Live door state. Empty for a level with no doors. */
   readonly doors: DoorSystem;
 
+  /** Live pushwall state. Empty for a level with no secrets. */
+  readonly pushwalls: PushwallSystem;
+
+  /**
+   * What the world announces as it changes: doors, secrets, footsteps.
+   *
+   * Owned by the map because the map owns the things that emit, and handed to the systems
+   * when they are built rather than reached for later. Audio subscribes to it in `main.ts`;
+   * so could a HUD, a score, or an enemy that hears you.
+   */
+  readonly events: EventBus;
+
   /**
    * Objects standing in the world. Not part of the grid, and deliberately so: a sprite has
    * a position rather than a cell, so two can share a cell and one can stand anywhere.
+   *
+   * Read-only to everyone outside the map, and changed through `spawn` and `despawn`. A
+   * game adds and removes things constantly — a dropped key, an enemy that dies, a barrel
+   * that becomes rubble — and until stage 17 this list was fixed at parse time.
    */
-  readonly sprites: readonly SpriteEntity[];
+  private readonly entities: SpriteEntity[];
 
   constructor(
     width: number,
@@ -45,18 +64,95 @@ export class GameMap {
     spawn: Spawn,
     doors: DoorSystem = new DoorSystem([], width, height),
     sprites: readonly SpriteEntity[] = [],
+    pushwalls: PushwallSystem = new PushwallSystem([], width, height),
+    events: EventBus = new EventBus(),
   ) {
     this.width = width;
     this.height = height;
     this.tiles = tiles;
     this.spawn = spawn;
     this.doors = doors;
-    this.sprites = sprites;
+    this.entities = [...sprites];
+    this.pushwalls = pushwalls;
+    this.events = events;
+  }
+
+  get sprites(): readonly SpriteEntity[] {
+    return this.entities;
+  }
+
+  /**
+   * Put something into the world. Returns the entity, so a caller can keep hold of it.
+   *
+   * Named `spawnEntity` rather than `spawn` because `map.spawn` is already where the
+   * *player* starts, and a game reading `map.spawn(...)` next to `map.spawn` would be
+   * entitled to be confused.
+   *
+   * Nothing checks whether the position is inside a wall: dropping an item where a body
+   * just died is a normal thing to do, and a game that wants to be fussier has
+   * `circleHitsSolid` to be fussy with.
+   */
+  spawnEntity(entity: SpriteEntity): SpriteEntity {
+    this.entities.push(entity);
+    return entity;
+  }
+
+  /**
+   * Take something out again. Returns false if it was not there.
+   *
+   * `splice` rather than swap-and-pop, because the sprite renderer sorts a *copy* of the
+   * order each frame and nothing depends on the list's order — but the collision sweep and
+   * any game code holding an index would notice things shuffling underneath them. The lists
+   * are tens of entries; the tidier semantics are worth more than the saved memmove.
+   */
+  despawnEntity(entity: SpriteEntity): boolean {
+    const at = this.entities.indexOf(entity);
+    if (at < 0) return false;
+    this.entities.splice(at, 1);
+    return true;
   }
 
   /** The door in a cell, or undefined. */
   doorAt(cellX: number, cellY: number): Door | undefined {
     return this.doors.at(cellX, cellY);
+  }
+
+  /** The pushwall currently covering a cell, or undefined. */
+  pushwallAt(cellX: number, cellY: number): Pushwall | undefined {
+    return this.pushwalls.at(cellX, cellY);
+  }
+
+  /**
+   * Push the secret wall in a cell, if there is one and it has anywhere to go.
+   *
+   * The direction is the caller's — it is where the *player* is pushing from, and only
+   * they know that. What the map contributes is which cells are free, since that depends
+   * on walls, doors and other pushwalls all at once.
+   *
+   * Returns false for a cell with no pushwall, so the caller can keep probing further out
+   * exactly as it does for doors.
+   */
+  push(cellX: number, cellY: number, dirX: number, dirY: number): boolean {
+    const wall = this.pushwalls.at(cellX, cellY);
+    if (!wall) return false;
+
+    return this.pushwalls.push(wall, dirX, dirY, (x, y) => !this.isSolid(x, y));
+  }
+
+  /**
+   * Advance secret walls.
+   *
+   * Wrapped here rather than called directly because a moving pushwall rewrites the tile
+   * grid as it goes, and the grid belongs to the map. `isOccupied` is the same callback
+   * doors use, and does the same job: nothing slides into a cell you are standing in.
+   */
+  updatePushwalls(dt: number, isOccupied: OccupancyTest): void {
+    this.pushwalls.update(dt, this.tiles, isOccupied);
+  }
+
+  /** Advance doors. Here rather than reached for through `map.doors` so both are symmetric. */
+  updateDoors(dt: number, isOccupied: OccupancyTest): void {
+    this.doors.update(dt, isOccupied);
   }
 
   /**
@@ -86,6 +182,23 @@ export class GameMap {
     const tile = this.tileAt(x, y);
     if (!isSolidTile(tile)) return false;
     if (tile === Tile.Door) return this.doors.blocksMovement(x, y);
+
+    /**
+     * A pushwall in motion is deliberately *not* solid at cell granularity.
+     *
+     * Its box straddles two cells, so calling both of them solid would block the player
+     * from up to a whole cell of floor that is plainly empty on screen — you would stop
+     * short of a wall you can see through the gap beside. Collision tests the box itself
+     * instead (see `circleHitsSolid`), which is exact and agrees with what is drawn.
+     *
+     * At rest the box fills exactly one cell, so the cell answer and the box answer are
+     * the same and this is an ordinary wall again.
+     */
+    if (tile === Tile.Pushwall) {
+      const wall = this.pushwalls.at(x, y);
+      return wall === undefined || !wall.moving;
+    }
+
     return true;
   }
 }
@@ -100,9 +213,10 @@ export class GameMap {
  *   #            wall
  *   1 2 3 4      wall variants (different textures later)
  *   D            door (solid for now; opens in Stage 9)
+ *   P            secret pushwall — looks like a wall, slides away when used
  *   ^ v < >      player spawn, facing north / south / west / east
  *   @            player spawn, facing east
- *   b g l c      sprites: barrel, plant, lamp, column (the cell stays floor)
+ *   b g l c m    sprites: barrel, plant, lamp, column, monster (the cell stays floor)
  *
  * Parsing is strict and throws on anything malformed. A level that is subtly wrong —
  * a ragged row, a stray character, a hole in the outer wall — produces confusing
@@ -123,6 +237,7 @@ export function parseMap(source: string): GameMap {
 
   let spawn: Spawn | null = null;
   const sprites: SpriteEntity[] = [];
+  const pushwalls: PushwallSpec[] = [];
 
   for (let y = 0; y < height; y++) {
     const row = rows[y]!;
@@ -147,10 +262,9 @@ export function parseMap(source: string): GameMap {
 
       const spriteKind = SPRITE_CHARS[char];
       if (spriteKind !== undefined) {
-        // The sprite stands at the centre of an ordinary floor cell. Sprites do not block
-        // movement -- walking through a plant is better than a collision system that has
-        // to reason about objects as well as the grid.
-        sprites.push({ x: x + 0.5, y: y + 0.5, kind: spriteKind });
+        // The sprite stands at the centre of an ordinary floor cell. Whether it blocks
+        // movement is a property of its kind, not of the grid — see SPRITE_SIZES.
+        sprites.push(makeEntity(x + 0.5, y + 0.5, spriteKind));
         tiles[y * width + x] = Tile.Floor;
         continue;
       }
@@ -159,6 +273,7 @@ export function parseMap(source: string): GameMap {
       if (tile === undefined) {
         throw new Error(`Unknown map character '${char}' at ${x},${y}`);
       }
+      if (tile === Tile.Pushwall) pushwalls.push({ cellX: x, cellY: y });
       tiles[y * width + x] = tile;
     }
   }
@@ -166,15 +281,22 @@ export function parseMap(source: string): GameMap {
   if (!spawn) throw new Error('Map has no spawn marker (one of @ ^ v < >)');
 
   const doors = collectDoors(tiles, width, height);
+
+  // One bus, handed to everything that emits on it.
+  const events = new EventBus();
+
   const map = new GameMap(
     width,
     height,
     tiles,
     spawn,
-    new DoorSystem(doors, width, height),
+    new DoorSystem(doors, width, height, events),
     sprites,
+    new PushwallSystem(pushwalls, width, height, events),
+    events,
   );
   assertEnclosed(map);
+  assertPushwallsCanMove(map, pushwalls);
   return map;
 }
 
@@ -211,6 +333,25 @@ function collectDoors(tiles: Uint8Array, width: number, height: number): DoorSpe
   }
 
   return specs;
+}
+
+/**
+ * Check every pushwall has somewhere to go.
+ *
+ * A pushwall boxed in on all four sides is not a secret, it is a wall — and an invisible
+ * mistake, because it looks exactly right until a player stands in front of it pressing
+ * the use key and nothing happens. Rejected here for the same reason a door with no frame
+ * is: the failure is silent, and much cheaper to catch at parse time than in play.
+ */
+function assertPushwallsCanMove(map: GameMap, specs: readonly PushwallSpec[]): void {
+  for (const { cellX, cellY } of specs) {
+    const free = PushwallSystem.hasSomewhereToGo(cellX, cellY, (x, y) => !map.isSolid(x, y));
+    if (!free) {
+      throw new Error(
+        `Pushwall at ${cellX},${cellY} is walled in on all four sides and could never move`,
+      );
+    }
+  }
 }
 
 /**

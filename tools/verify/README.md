@@ -17,8 +17,14 @@ lib/harness.ts        check/near helpers, the DOM stub, synthetic textures
 node/decode.ts        image pixels -> Texture: transpose, alpha, size validation, seams
 node/sprite-alpha.ts  sprite compositing maths
 node/renderer.ts      cross-stage regressions: wallX, doors, sprites, orientation, whole frames
-browser/images.mjs    the placeholder PNGs decode and tile correctly
+node/collision.ts     circle-vs-grid and circle-vs-entity: contacts, sliding, corners
+node/sprites.ts       sheet slicing, direction selection, animation timing, the behaviour hook
+node/pushwalls.ts     ray-vs-box, grid rewriting, collision agreeing with the render
+node/audio.ts         attenuation and panning as pure maths, the event bus, footstep cadence
+node/extending.ts     the game-facing seams: spawning, line of sight, overlays, screen blits
+browser/images.mjs    the PNGs decode and tile correctly; sheets divide into cells
 browser/loader.mjs    fetch + decode + canvas readback, end to end
+browser/audio.mjs     sounds decode; the graph renders offline and lands in the right ear
 ```
 
 The node checks need no browser: `stubDocument()` supplies the handful of DOM calls
@@ -39,10 +45,36 @@ to add more:
   read back out of the rendered image.
 - **The alpha-ordering check** (`node/sprite-alpha.ts`) asserts that the two possible
   orderings *differ*, so it would actually fail if the code read alpha after shading.
+- **The direction checks** (`node/sprites.ts`) assert that the *opposite* sign convention
+  agrees on front and back and disagrees on both flanks. Front and back pass under either
+  convention, so a check of those alone would be blind to a mirrored sheet — the same class
+  of bug as the mirrored walls, in a new costume.
 
 The pattern: assert what should have happened, not merely that something happened. Several
 real bugs in this project — corners that silently stopped the player, sprites drawn at the
 wrong place off-axis — passed every invariant that only asked "is the state still valid?".
+
+A corollary worth remembering: **when a new check fails, suspect the check first.** The Stage
+13 sweep reported all 180 approaches frozen because every one of them was aimed at the
+barrel's dead centre. The Stage 14 render check reported the renderer four cells out because
+it placed every viewer on the wrong side of the monster. Fourteen Stage 15 checks failed
+because the test set a pushwall's position directly instead of driving it, leaving the tile
+grid describing where the box used to be. Every time, the engine was right.
+
+The Stage 15 case suggests the general shape: **drive the real API rather than assigning to
+state**. A check that reaches past the code that maintains an invariant is testing a world
+the program cannot be in.
+
+## One headless quirk, so nobody chases it twice
+
+**Do not click the canvas in a headless screenshot script unless you mean to.** The click
+requests pointer lock, and headless Chromium's implementation of it drops the page to about
+2 fps — the engine's own counter reports it, which makes it look exactly like a rendering
+regression that appears "when you walk", because walking is what you do after clicking.
+
+Headed, with the same build, the lock is acquired and the frame rate stays at 60. Confirmed
+twice over: stubbing `requestPointerLock` to a no-op restores 60 fps headless, and
+`chromium.launch({ headless: false })` never drops in the first place.
 
 ## Adding a check
 
