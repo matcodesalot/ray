@@ -1,3 +1,4 @@
+import { SPRITE_SIZES } from './entities';
 import type { GameMap } from './map';
 
 /**
@@ -10,6 +11,18 @@ import type { GameMap } from './map';
  * A circle in a grid world is the easy case. Every solid thing is an axis-aligned unit
  * square, and circle-versus-rectangle has a two-line exact answer, so there is no need for
  * anything general-purpose here.
+ *
+ * ## Entities (Stage 13)
+ *
+ * Stage 8 said this file never learns that anything but the grid exists. That stopped being
+ * true when sprites started blocking movement: both tests below now also sweep the entity
+ * list. It is a small addition and it costs nothing structurally, because a circle-versus-
+ * circle contact normal is *radial* — exactly the shape the corner case already produces,
+ * so the resolver needed no changes at all.
+ *
+ * The sweep is linear over every sprite in the level. At the couple of dozen a level holds,
+ * and only on the ticks that actually touch something, that is far cheaper than the spatial
+ * index it would take to avoid. Bucketing entities by cell is the fix if that ever changes.
  */
 
 /**
@@ -52,6 +65,20 @@ export function circleHitsSolid(
       const dy = y - nearestY;
       if (dx * dx + dy * dy < radiusSquared) return true;
     }
+  }
+
+  // Blocking entities. Circle against circle: they overlap when the centres are closer
+  // than the sum of the radii, which needs no square root to decide.
+  const sprites = map.sprites;
+  for (let i = 0; i < sprites.length; i++) {
+    const sprite = sprites[i]!;
+    const blocking = SPRITE_SIZES[sprite.kind].blocking;
+    if (blocking <= 0) continue;
+
+    const dx = x - sprite.x;
+    const dy = y - sprite.y;
+    const reach = radius + blocking;
+    if (dx * dx + dy * dy < reach * reach) return true;
   }
 
   return false;
@@ -164,6 +191,44 @@ function opposingContactNormal(
         bestX = dx;
         bestY = dy;
       }
+    }
+  }
+
+  /**
+   * Blocking entities, in the same representation the cell loop uses: a vector pointing
+   * from the surface out to the centre, whose *length* is the distance to that surface.
+   * Keeping that form is what lets the normalisation below stay shared.
+   *
+   * `gap` is floored at a hair above zero so that a body which has somehow ended up inside
+   * an entity still yields a direction to escape along. Left at zero the vector would
+   * collapse and the caller would be told there is nothing to slide against — the
+   * welded-into-a-corner failure from Stage 8, in a new costume.
+   */
+  const sprites = map.sprites;
+  for (let i = 0; i < sprites.length; i++) {
+    const sprite = sprites[i]!;
+    const blocking = SPRITE_SIZES[sprite.kind].blocking;
+    if (blocking <= 0) continue;
+
+    const dx = x - sprite.x;
+    const dy = y - sprite.y;
+
+    const distance = Math.hypot(dx, dy);
+    if (distance < 1e-9) continue; // exactly concentric: no direction to push along
+
+    const gap = distance - blocking;
+    if (gap >= radius) continue; // not touching
+
+    // Travelling away from it, or along it: not what is stopping us.
+    if (motionX * dx + motionY * dy >= 0) continue;
+
+    const depth = gap > 1e-6 ? gap : 1e-6;
+    const squared = depth * depth;
+    if (squared < bestSquared) {
+      bestSquared = squared;
+      const scale = depth / distance;
+      bestX = dx * scale;
+      bestY = dy * scale;
     }
   }
 

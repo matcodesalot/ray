@@ -1,6 +1,6 @@
 # ray
 
-A Wolfenstein 3D–style raycaster in TypeScript, built in twelve stages you can check out
+A Wolfenstein 3D–style raycaster in TypeScript, built in thirteen stages you can check out
 and run individually.
 
 Everything is drawn by hand into a 320×200 buffer of 32-bit pixels — no WebGL, no canvas
@@ -39,6 +39,7 @@ Each stage is one commit and one tag, with a document explaining what it added a
 | 10 | [sprites](docs/stage-10-sprites.md) | Billboards, depth testing, painter ordering |
 | 11 | [polish](docs/stage-11-polish.md) | Minimap, help overlay, edge anti-aliasing, performance |
 | 12 | [image textures](docs/stage-12-image-textures.md) | Loading real PNGs: async boot, a manifest, alpha, orientation |
+| 13 | [blocking sprites](docs/stage-13-blocking-sprites.md) | Objects stop being scenery you walk through |
 
 ---
 
@@ -132,8 +133,8 @@ you, covered in [stage 12](docs/stage-12-image-textures.md):
 
 - **No sloped floors, room-over-room, or looking up and down.** All ruled out by the fixed
   camera height, which is what everything else is built on.
-- **Sprites do not block movement** and do not animate. Both are noted with the hook for
-  adding them in [stage 10](docs/stage-10-sprites.md).
+- **Sprites do not animate or face different directions** yet — that is stage 14. They do
+  block movement, as of [stage 13](docs/stage-13-blocking-sprites.md).
 - **No combat, enemies, or game logic.** This is the renderer and the world it moves
   through, not a game.
 - **No test framework.** Verification is a set of plain scripts under
