@@ -49,8 +49,12 @@ export class GameMap {
   /**
    * Objects standing in the world. Not part of the grid, and deliberately so: a sprite has
    * a position rather than a cell, so two can share a cell and one can stand anywhere.
+   *
+   * Read-only to everyone outside the map, and changed through `spawn` and `despawn`. A
+   * game adds and removes things constantly — a dropped key, an enemy that dies, a barrel
+   * that becomes rubble — and until stage 17 this list was fixed at parse time.
    */
-  readonly sprites: readonly SpriteEntity[];
+  private readonly entities: SpriteEntity[];
 
   constructor(
     width: number,
@@ -67,9 +71,44 @@ export class GameMap {
     this.tiles = tiles;
     this.spawn = spawn;
     this.doors = doors;
-    this.sprites = sprites;
+    this.entities = [...sprites];
     this.pushwalls = pushwalls;
     this.events = events;
+  }
+
+  get sprites(): readonly SpriteEntity[] {
+    return this.entities;
+  }
+
+  /**
+   * Put something into the world. Returns the entity, so a caller can keep hold of it.
+   *
+   * Named `spawnEntity` rather than `spawn` because `map.spawn` is already where the
+   * *player* starts, and a game reading `map.spawn(...)` next to `map.spawn` would be
+   * entitled to be confused.
+   *
+   * Nothing checks whether the position is inside a wall: dropping an item where a body
+   * just died is a normal thing to do, and a game that wants to be fussier has
+   * `circleHitsSolid` to be fussy with.
+   */
+  spawnEntity(entity: SpriteEntity): SpriteEntity {
+    this.entities.push(entity);
+    return entity;
+  }
+
+  /**
+   * Take something out again. Returns false if it was not there.
+   *
+   * `splice` rather than swap-and-pop, because the sprite renderer sorts a *copy* of the
+   * order each frame and nothing depends on the list's order — but the collision sweep and
+   * any game code holding an index would notice things shuffling underneath them. The lists
+   * are tens of entries; the tidier semantics are worth more than the saved memmove.
+   */
+  despawnEntity(entity: SpriteEntity): boolean {
+    const at = this.entities.indexOf(entity);
+    if (at < 0) return false;
+    this.entities.splice(at, 1);
+    return true;
   }
 
   /** The door in a cell, or undefined. */

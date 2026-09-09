@@ -62,12 +62,34 @@ export function directionIndex(
 
 export class SpriteRenderer {
   /** Indices into the sprite list, reordered far-to-near each frame. */
-  private readonly order: Int32Array;
+  private order: Int32Array;
 
   /** Squared distance for each sprite, parallel to the sprite list. */
-  private readonly distance: Float64Array;
+  private distance: Float64Array;
 
+  /** `capacity` is a starting size, not a limit — see `reserve`. */
   constructor(capacity: number) {
+    this.order = new Int32Array(capacity);
+    this.distance = new Float64Array(capacity);
+  }
+
+  /**
+   * Make room for at least `count` sprites, growing the scratch arrays if needed.
+   *
+   * Until stage 17 the capacity was fixed at construction and `draw` quietly clamped to it,
+   * so a game that spawned one entity more than the level file contained would find that
+   * entity simply never drawn — no error, no warning, just an object that is not there.
+   * That is the worst kind of limit: silent, and discovered late.
+   *
+   * Growing allocates, which is why it is a separate step rather than something `draw` does
+   * inline. It happens when the population reaches a new high-water mark and never again;
+   * doubling means a game that spawns steadily stops allocating almost immediately, and the
+   * per-frame path stays exactly as free of allocation as it was.
+   */
+  reserve(count: number): void {
+    if (count <= this.order.length) return;
+
+    const capacity = Math.max(count, this.order.length * 2);
     this.order = new Int32Array(capacity);
     this.distance = new Float64Array(capacity);
   }
@@ -89,8 +111,10 @@ export class SpriteRenderer {
     textures: TextureSet,
     options: RenderOptions,
   ): void {
-    const count = Math.min(sprites.length, this.order.length);
+    const count = sprites.length;
     if (count === 0) return;
+
+    this.reserve(count);
 
     this.sortFarToNear(player, sprites, count);
 

@@ -34,6 +34,7 @@ import {
   type Rect,
 } from './render/minimap';
 import { DEFAULT_RENDER_OPTIONS } from './render/options';
+import { OverlayStack } from './render/overlay';
 import { RayFan } from './render/raycast';
 import { SpriteRenderer } from './render/sprites';
 import { antialiasWallEdges, createWallSpans, drawWalls, type WallSpans } from './render/walls';
@@ -327,6 +328,15 @@ let textures!: TextureSet;
 const behaviourContext = { map, player, seconds: 0 };
 
 /**
+ * Passes that draw over the finished world: a HUD, a weapon, a damage flash.
+ *
+ * Empty, because this is an engine and not a game. It exists so there is one obvious place
+ * to attach those things, and so that place is *after* the world and *before* the frame is
+ * presented — see docs/extending.md.
+ */
+const overlays = new OverlayStack();
+
+/**
  * The mixer, once the sounds have loaded. Undefined if they could not be.
  *
  * Unlike textures, audio failing is **not** fatal. A world with no textures is a black
@@ -520,6 +530,9 @@ async function boot(): Promise<void> {
         drawPlayer(framebuffer, player, layout);
       }
     }
+
+    // The game's own drawing: after everything with a position, before the frame goes out.
+    overlays.draw(framebuffer, player, render);
 
     if (needsClear) {
       ctx.fillStyle = '#000';

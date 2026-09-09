@@ -21,6 +21,7 @@ node/collision.ts     circle-vs-grid and circle-vs-entity: contacts, sliding, co
 node/sprites.ts       sheet slicing, direction selection, animation timing, the behaviour hook
 node/pushwalls.ts     ray-vs-box, grid rewriting, collision agreeing with the render
 node/audio.ts         attenuation and panning as pure maths, the event bus, footstep cadence
+node/extending.ts     the game-facing seams: spawning, line of sight, overlays, screen blits
 browser/images.mjs    the PNGs decode and tile correctly; sheets divide into cells
 browser/loader.mjs    fetch + decode + canvas readback, end to end
 browser/audio.mjs     sounds decode; the graph renders offline and lands in the right ear
@@ -63,6 +64,17 @@ grid describing where the box used to be. Every time, the engine was right.
 The Stage 15 case suggests the general shape: **drive the real API rather than assigning to
 state**. A check that reaches past the code that maintains an invariant is testing a world
 the program cannot be in.
+
+## One headless quirk, so nobody chases it twice
+
+**Do not click the canvas in a headless screenshot script unless you mean to.** The click
+requests pointer lock, and headless Chromium's implementation of it drops the page to about
+2 fps — the engine's own counter reports it, which makes it look exactly like a rendering
+regression that appears "when you walk", because walking is what you do after clicking.
+
+Headed, with the same build, the lock is acquired and the frame rate stays at 60. Confirmed
+twice over: stubbing `requestPointerLock` to a no-op restores 60 fps headless, and
+`chromium.launch({ headless: false })` never drops in the first place.
 
 ## Adding a check
 

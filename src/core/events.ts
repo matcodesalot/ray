@@ -41,7 +41,22 @@ export const WorldEvent = {
 
 export type WorldEvent = (typeof WorldEvent)[keyof typeof WorldEvent];
 
-export type WorldEventListener = (event: WorldEvent, x: number, y: number) => void;
+/**
+ * Where a game numbers its own events from.
+ *
+ * The bus carries plain numbers rather than a closed union, because a closed union is
+ * exactly the thing a game cannot extend from outside. Engine events are the small numbers;
+ * anything from here up belongs to whoever is building on top, and the gap in between is
+ * room for this engine to grow without renumbering anybody.
+ *
+ *     export const GameEvent = {
+ *       EnemyDied: GAME_EVENT_BASE,
+ *       KeyPicked: GAME_EVENT_BASE + 1,
+ *     } as const;
+ */
+export const GAME_EVENT_BASE = 64;
+
+export type WorldEventListener = (event: number, x: number, y: number) => void;
 
 export class EventBus {
   private readonly listeners: WorldEventListener[] = [];
@@ -63,7 +78,7 @@ export class EventBus {
    * listener that throws is a bug in the listener, and swallowing it here would turn a
    * stack trace pointing at the culprit into sound that silently stops working.
    */
-  emit(event: WorldEvent, x: number, y: number): void {
+  emit(event: number, x: number, y: number): void {
     for (let i = 0; i < this.listeners.length; i++) {
       this.listeners[i]!(event, x, y);
     }

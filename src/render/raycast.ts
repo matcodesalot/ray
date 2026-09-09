@@ -494,6 +494,56 @@ export function castRay(
 }
 
 /**
+ * Reused by `lineOfSight`, which is called from game logic rather than the render loop and
+ * has no fan of its own to write into.
+ */
+const sightHit = createRayHit();
+
+/**
+ * Can something at one point see something at another?
+ *
+ * The same DDA that answers "what does this screen column see" answers "can the guard see
+ * the player", and that is worth noticing: a raycaster's central routine is a *visibility*
+ * query, and the renderer is only its most demanding customer. A game needs this for sight,
+ * for hitscan weapons, and for anything that should not work through a wall.
+ *
+ * ## The one trap
+ *
+ * `RayHit.perpDist` is measured in **ray lengths** — multiples of the direction vector it
+ * was given. The renderer exploits that by passing an unnormalised direction whose
+ * component along the view axis is exactly 1, which is what makes distances perpendicular
+ * for free and needs no fisheye correction.
+ *
+ * Here the direction is **normalised**, so one ray length is one world unit and `perpDist`
+ * is a plain distance you can compare against `Math.hypot`. Pass an unnormalised direction
+ * and this still returns a boolean, still looks reasonable, and is wrong by whatever the
+ * length happened to be.
+ *
+ * Doors and pushwalls need no special handling: the DDA already stops at a closed door's
+ * slab and passes through an open one, so a guard can see you through a doorway exactly
+ * when you can see them.
+ */
+export function lineOfSight(
+  map: GameMap,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+): boolean {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+
+  const distance = Math.hypot(dx, dy);
+  if (distance < 1e-9) return true; // same point: trivially visible, and no direction to cast
+
+  castRay(map, fromX, fromY, dx / distance, dy / distance, sightHit);
+
+  // Strictly greater: a wall exactly at the target means the target is *in* the wall, and
+  // the surface is what you can see rather than the thing behind it.
+  return sightHit.perpDist >= distance;
+}
+
+/**
  * One ray per screen column, cast as a batch.
  *
  * Owns its results so nothing allocates per frame. `hits[x]` is the wall in front of

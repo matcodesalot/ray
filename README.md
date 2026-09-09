@@ -1,6 +1,6 @@
 # ray
 
-A Wolfenstein 3D–style raycaster in TypeScript, built in sixteen stages you can check out
+A Wolfenstein 3D–style raycaster in TypeScript, built in seventeen stages you can check out
 and run individually.
 
 Everything is drawn by hand into a 320×200 buffer of 32-bit pixels — no WebGL, no canvas
@@ -43,6 +43,7 @@ Each stage is one commit and one tag, with a document explaining what it added a
 | 14 | [directional sprites](docs/stage-14-directional-sprites.md) | Eight-way facing, animation sheets, the behaviour hook |
 | 15 | [pushwalls](docs/stage-15-pushwalls.md) | A whole cell that moves: ray-vs-box, and a solid surface off the grid |
 | 16 | [audio](docs/stage-16-audio.md) | An event bus, positional sound, and the camera plane as a pair of ears |
+| 17 | [extension points](docs/stage-17-extension-points.md) | The seams a game attaches to, and [a guide to them](docs/extending.md) |
 
 ---
 
@@ -117,7 +118,7 @@ src/
   world/                map, doors, pushwalls, collision, entities, behaviours
   audio/                sound manifest, loader, mixer, positional maths
   core/                 fixed-timestep loop, world event bus
-  render/               raycast, walls, floors, sprites, lighting, minimap
+  render/               raycast, walls, floors, sprites, lighting, minimap, overlays
   assets/               the texture manifest and loader, plus the PNGs and Ogg files
 docs/                   one document per stage
 tools/                  placeholder generator, sprite-sheet importer, verification scripts
@@ -150,6 +151,18 @@ artwork (it leaves existing files alone unless you pass `--force`).
 
 The monster is third-party CC0 art; everything else is a generated placeholder. See
 [CREDITS.md](CREDITS.md).
+
+## Writing a game on top of it
+
+The engine is finished and the game is not written. **[docs/extending.md](docs/extending.md)**
+is the map of where the two meet: entity behaviours, spawning, the event bus, visibility
+queries, collision, and where a HUD or a weapon overlay goes in the frame.
+
+```
+raycast → walls → floors → sprites → edge AA → [ your overlays ] → present
+```
+
+---
 
 ## Things it deliberately does not do
 

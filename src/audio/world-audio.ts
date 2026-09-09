@@ -13,7 +13,7 @@ import type { Listener, Mixer } from './mixer';
  * An event with no sound is a normal thing, not an omission — a pushwall arriving stops
  * being interesting once you can see it has stopped.
  */
-const SOUND_FOR: Readonly<Partial<Record<WorldEvent, Sound>>> = {
+const SOUND_FOR: Readonly<Partial<Record<number, Sound>>> = {
   [WorldEvent.DoorOpening]: Sound.DoorOpen,
   [WorldEvent.DoorClosing]: Sound.DoorClose,
   [WorldEvent.PushwallStart]: Sound.Pushwall,
