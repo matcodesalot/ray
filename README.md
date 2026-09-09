@@ -1,6 +1,6 @@
 # ray
 
-A Wolfenstein 3D–style raycaster in TypeScript, built in thirteen stages you can check out
+A Wolfenstein 3D–style raycaster in TypeScript, built in fourteen stages you can check out
 and run individually.
 
 Everything is drawn by hand into a 320×200 buffer of 32-bit pixels — no WebGL, no canvas
@@ -40,6 +40,7 @@ Each stage is one commit and one tag, with a document explaining what it added a
 | 11 | [polish](docs/stage-11-polish.md) | Minimap, help overlay, edge anti-aliasing, performance |
 | 12 | [image textures](docs/stage-12-image-textures.md) | Loading real PNGs: async boot, a manifest, alpha, orientation |
 | 13 | [blocking sprites](docs/stage-13-blocking-sprites.md) | Objects stop being scenery you walk through |
+| 14 | [directional sprites](docs/stage-14-directional-sprites.md) | Eight-way facing, animation sheets, the behaviour hook |
 
 ---
 
@@ -58,6 +59,7 @@ A frame is four passes over a 320×200 buffer:
         │
         ▼
   sprites                sorted far to near, depth-tested against the ray fan
+                         (a directional sprite picks its cell from the viewing angle)
 ```
 
 Three ideas do most of the work:
@@ -83,16 +85,17 @@ Measured at 320×200, median of 3000 frames, against a 16.67 ms budget:
 
 | pass | time |
 | --- | --- |
-| raycast, 320 rays | 0.016 ms |
-| walls | 0.049 ms |
-| floors and ceilings | 0.114 ms |
-| sprites (17 objects) | 0.003 ms |
-| edge anti-aliasing | 0.009 ms |
-| **full frame** | **0.166 ms** |
+| entity update (behaviour + animation) | 0.001 ms |
+| raycast, 320 rays | 0.013 ms |
+| walls | 0.046 ms |
+| floors and ceilings | 0.092 ms |
+| sprites (20 objects, 3 animated) | 0.001 ms |
+| edge anti-aliasing | 0.007 ms |
+| **full frame** | **0.159 ms** |
 
-Heap growth over 300 frames: **0 KB**. Nothing in the render path allocates — the only
-asynchronous code in the project is the texture load, which runs once before the first
-frame.
+Retained heap growth over 300 frames: **0 KB**. Nothing in the render path or the tick
+allocates — the only asynchronous code in the project is the texture load, which runs once
+before the first frame.
 
 ---
 
@@ -105,11 +108,11 @@ src/
   player.ts             position, direction, camera plane, movement
   core/loop.ts          fixed-timestep loop
   engine/               framebuffer and pixel packing — knows nothing about the game
-  world/                map, doors, collision, entities
+  world/                map, doors, collision, entities, behaviours
   render/               raycast, walls, floors, sprites, lighting, minimap
   assets/               the texture manifest, loader, and the PNGs themselves
 docs/                   one document per stage
-tools/                  placeholder generator, verification scripts
+tools/                  placeholder generator, sprite-sheet importer, verification scripts
 ```
 
 `engine/` and `core/` never import from `world/`; `render/` never mutates game state.
@@ -129,14 +132,24 @@ you, covered in [stage 12](docs/stage-12-image-textures.md):
 - sprites need transparent margins and should stand on the bottom edge of the image
 - everything must be exactly 64×64 (the loader checks this one, and names the file)
 
+Animated sprites are **sheets**: 64px cells, eight columns for the eight stored directions
+and one row per animation frame — see [stage 14](docs/stage-14-directional-sprites.md).
+`node tools/import-sprites.mjs <source.png> <out.png> --rows=...` converts a third-party
+sheet into that layout, and `node tools/make-placeholders.mjs` regenerates the stand-in
+artwork (it leaves existing files alone unless you pass `--force`).
+
+The monster is third-party CC0 art; everything else is a generated placeholder. See
+[CREDITS.md](CREDITS.md).
+
 ## Things it deliberately does not do
 
 - **No sloped floors, room-over-room, or looking up and down.** All ruled out by the fixed
   camera height, which is what everything else is built on.
-- **Sprites do not animate or face different directions** yet — that is stage 14. They do
-  block movement, as of [stage 13](docs/stage-13-blocking-sprites.md).
-- **No combat, enemies, or game logic.** This is the renderer and the world it moves
-  through, not a game.
+- **No pushwalls.** The one remaining renderer gap: the DDA assumes a static grid, and a
+  secret wall that slides two cells cannot be expressed in it yet. That is stage 15.
+- **No combat, enemies, or game logic.** Sprites face and animate, and there is a per-entity
+  behaviour hook, but nothing in `src/` decides to attack you. The patrol driver in
+  `world/demo-patrol.ts` is a demonstration of the hook and is safe to delete.
 - **No test framework.** Verification is a set of plain scripts under
   [`tools/verify/`](tools/verify/) that import the real modules and assert against them:
   `npm run verify -- --all`. What each stage checked is written up in its document.

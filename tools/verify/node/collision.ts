@@ -1,6 +1,6 @@
 import { check, near, section, done } from '../lib/harness';
 
-import { circleHitsSolid, slideMove } from '../../../src/world/collision';
+import { circleHitsSolid, slideMove, NO_ENTITIES } from '../../../src/world/collision';
 import { parseMap } from '../../../src/world/map';
 import { Player } from '../../../src/player';
 import { LEVEL_1 } from '../../../src/world/levels/level1';
@@ -133,6 +133,71 @@ section('escaping from inside an entity');
   check('starts overlapping', circleHitsSolid(room, pos.x, pos.y, R), true);
   for (let i = 0; i < 300; i++) slideMove(room, pos, 0.02, 0.02, R);
   check('can walk out rather than being trapped', circleHitsSolid(room, pos.x, pos.y, R), false);
+}
+
+section('an entity that walks into you (Stage 14)');
+{
+  /**
+   * The reported bug: standing next to a monster and a wall, you walked through the wall.
+   *
+   * Until entities could move, an overlap meant a badly authored level, and `slideMove`
+   * escaped it by letting the move happen unchecked — which disabled collision against
+   * *everything*, the grid included. Once monsters walk into you that state arrives every
+   * few seconds, and the escape hatch became a hole in the world.
+   */
+  const corridor = parseMap(`
+#######
+#.....#
+#..m..#
+#..>..#
+#######
+`);
+  const monster = corridor.sprites[0]!;
+  const MONSTER = SPRITE_SIZES[SpriteKind.Monster].blocking;
+
+  // The monster has walked onto a player standing against the north wall.
+  monster.x = 3.5;
+  monster.y = 1.6;
+  const pos = { x: 3.5, y: 1.5 };
+
+  check('the body is inside the entity', circleHitsSolid(corridor, pos.x, pos.y, R), true);
+  check('and not inside a wall', circleHitsSolid(corridor, pos.x, pos.y, R, NO_ENTITIES), false);
+
+  for (let i = 0; i < 60; i++) slideMove(corridor, pos, 0, -0.09, R);
+  near('pushing into the wall stops at its face', pos.y, 1 + R, 1e-3);
+  check('rather than leaving the level', pos.y > 0, true);
+
+  // The escape itself must survive: you can still walk out of what walked into you.
+  monster.x = 3.5;
+  monster.y = 1.6;
+  const out = { x: 3.5, y: 1.6 };
+  for (let i = 0; i < 60; i++) slideMove(corridor, out, 0.06, 0, R);
+  check('and you can still walk out of it', circleHitsSolid(corridor, out.x, out.y, R), false);
+  near('stopping at the east wall like anything else', out.x, 6 - R, 1e-3);
+
+  /**
+   * The wall escape it replaced still works. A body genuinely inside the grid — a spawn
+   * placed badly, or a radius raised at run time — must be able to walk out, or it is
+   * trapped forever.
+   */
+  const inWall = { x: 1.1, y: 1.1 };
+  check('a body inside a wall is detected as such', circleHitsSolid(corridor, inWall.x, inWall.y, R, NO_ENTITIES), true);
+  slideMove(corridor, inWall, 0.09, 0.09, R);
+  check('and is still allowed to move out unchecked', inWall.x > 1.1, true);
+
+  // A monster parked on top of a randomly moving body must never let it through a wall.
+  let seed = 9001;
+  const rand = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const body = { x: 3.5, y: 2.5 };
+  let escaped = 0;
+  for (let i = 0; i < 200_000; i++) {
+    monster.x = body.x + (rand() - 0.5) * MONSTER;
+    monster.y = body.y + (rand() - 0.5) * MONSTER;
+    slideMove(corridor, body, (rand() * 2 - 1) * 0.09, (rand() * 2 - 1) * 0.09, R);
+    if (circleHitsSolid(corridor, body.x, body.y, R, NO_ENTITIES)) escaped++;
+  }
+  check('200000 random moves with a monster sitting on you, never inside a wall', escaped, 0);
+  check('and still in the room', body.x > 1 && body.x < 6 && body.y > 1 && body.y < 4, true);
 }
 
 section('Stage 8 guarantees still hold');

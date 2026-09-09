@@ -1,5 +1,12 @@
 import { TEXTURE_MANIFEST, TILING } from './manifest';
-import { textureFromPixels, warnAboutSeams, type Texture, type TextureSet } from './decode';
+import {
+  sheetFromPixels,
+  textureFromPixels,
+  warnAboutSeams,
+  type SpriteSheet,
+  type Texture,
+  type TextureSet,
+} from './decode';
 
 /**
  * Loading textures from image files.
@@ -14,7 +21,8 @@ import { textureFromPixels, warnAboutSeams, type Texture, type TextureSet } from
  */
 
 export type { Texture, TextureSet } from './decode';
-export { wallTexture, spriteTexture } from './decode';
+export { wallTexture, spriteTexture, spriteCell } from './decode';
+export type { SpriteSheet } from './decode';
 
 /**
  * Fetch, decode and convert one image.
@@ -22,7 +30,7 @@ export { wallTexture, spriteTexture } from './decode';
  * Failures are reported as themselves — a 404 says it is a 404, naming the file — rather
  * than being allowed to surface later as an undefined texture or a black wall.
  */
-async function loadTexture(url: string): Promise<Texture> {
+async function decodeImage(url: string): Promise<{ label: string; image: ImageData }> {
   const label = url.split('/').pop() ?? url;
 
   let bitmap: ImageBitmap;
@@ -46,13 +54,36 @@ async function loadTexture(url: string): Promise<Texture> {
   ctx.drawImage(bitmap, 0, 0);
   bitmap.close();
 
-  const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return { label, image: ctx.getImageData(0, 0, canvas.width, canvas.height) };
+}
+
+/** Fetch, decode and convert one single-image texture. */
+async function loadTexture(url: string): Promise<Texture> {
+  const { label, image } = await decodeImage(url);
   const texture = textureFromPixels(image.data, image.width, image.height, label);
 
   const tiling = TILING[url];
   if (tiling && import.meta.env?.DEV) warnAboutSeams(texture, label, tiling);
 
   return texture;
+}
+
+/** Fetch, decode and slice one sprite sheet. */
+async function loadSheet(spec: { url: string; animations: SpriteSheet['animations'] }): Promise<SpriteSheet> {
+  const { label, image } = await decodeImage(spec.url);
+  const { columns, rows, cells } = sheetFromPixels(image.data, image.width, image.height, label);
+
+  for (const [name, animation] of Object.entries(spec.animations)) {
+    const last = animation.firstRow + animation.frames - 1;
+    if (last >= rows) {
+      throw new Error(
+        `${label}: animation '${name}' runs to row ${last}, but the sheet has only ${rows}. ` +
+          `Rows are animation frames and columns are directions.`,
+      );
+    }
+  }
+
+  return { columns, rows, cells, animations: spec.animations };
 }
 
 /**
@@ -66,16 +97,23 @@ export async function loadTextures(): Promise<TextureSet> {
     ...Object.entries(TEXTURE_MANIFEST.walls).map(
       ([tile, url]) => [`wall:${tile}`, url] as [string, string],
     ),
-    ...Object.entries(TEXTURE_MANIFEST.sprites).map(
-      ([kind, url]) => [`sprite:${kind}`, url] as [string, string],
-    ),
+    ...Object.entries(TEXTURE_MANIFEST.sprites)
+      .filter(([, art]) => typeof art === 'string')
+      .map(([kind, art]) => [`sprite:${kind}`, art as string] as [string, string]),
     ['doorFrame', TEXTURE_MANIFEST.doorFrame],
     ['floor', TEXTURE_MANIFEST.floor],
     ['ceiling', TEXTURE_MANIFEST.ceiling],
     ['missing', TEXTURE_MANIFEST.missing],
   ];
 
-  const loaded = await Promise.all(entries.map(([, url]) => loadTexture(url)));
+  const sheetEntries = Object.entries(TEXTURE_MANIFEST.sprites).filter(
+    ([, art]) => typeof art !== 'string',
+  ) as [string, { url: string; animations: SpriteSheet['animations'] }][];
+
+  const [loaded, loadedSheets] = await Promise.all([
+    Promise.all(entries.map(([, url]) => loadTexture(url))),
+    Promise.all(sheetEntries.map(([, spec]) => loadSheet(spec))),
+  ]);
 
   const walls: Record<number, Texture> = {};
   const sprites: Record<number, Texture> = {};
@@ -94,5 +132,10 @@ export async function loadTextures(): Promise<TextureSet> {
     else missing = texture;
   });
 
-  return { walls, sprites, doorFrame, floor, ceiling, missing };
+  const spriteSheets: Record<number, SpriteSheet> = {};
+  sheetEntries.forEach(([kind], index) => {
+    spriteSheets[Number(kind)] = loadedSheets[index]!;
+  });
+
+  return { walls, sprites, spriteSheets, doorFrame, floor, ceiling, missing };
 }

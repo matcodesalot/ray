@@ -9,6 +9,7 @@ import {
   VIEW_W,
 } from './config';
 import { loadTextures } from './assets/loader';
+import { animationTiming } from './assets/decode';
 import type { TextureSet } from './assets/decode';
 import { FpsCounter, startLoop } from './core/loop';
 import { Framebuffer } from './engine/framebuffer';
@@ -30,6 +31,8 @@ import { DEFAULT_RENDER_OPTIONS } from './render/options';
 import { RayFan } from './render/raycast';
 import { SpriteRenderer } from './render/sprites';
 import { antialiasWallEdges, createWallSpans, drawWalls, type WallSpans } from './render/walls';
+import { attachDemoBehaviours } from './world/demo-patrol';
+import { SpriteKind, updateEntities } from './world/entities';
 import { LEVEL_1 } from './world/levels/level1';
 
 /** Look up a required element, failing loudly rather than propagating a null. */
@@ -294,6 +297,18 @@ function buildOverlay(): string {
 let textures!: TextureSet;
 
 /**
+ * Reused between ticks, like everything else on the hot path.
+ *
+ * A fresh context object each tick would be a few dozen bytes sixty times a second — not a
+ * problem in itself, but the project's claim is that a steady frame allocates nothing at
+ * all, and that claim is only worth making if it stays true.
+ */
+const behaviourContext = { map, player, seconds: 0 };
+
+/** Where entity animation timings come from. Hoisted so it is not a fresh closure per tick. */
+const entityTiming = (kind: number, animation: string) => animationTiming(textures, kind, animation);
+
+/**
  * Load the artwork, then start the engine.
  *
  * This is the only asynchronous code in the project. Every texture used to be arithmetic
@@ -310,6 +325,9 @@ async function boot(): Promise<void> {
 
   try {
     textures = await loadTextures();
+    // Demo only. Removing this line, and the file it comes from, leaves the engine intact
+    // and the monsters standing still. See src/world/demo-patrol.ts.
+    attachDemoBehaviours(map, SpriteKind.Monster);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     overlay.textContent =
@@ -367,6 +385,16 @@ async function boot(): Promise<void> {
     // Doors advance after movement, so the occupancy test sees where the player actually
     // ended up this tick rather than where they were at the start of it.
     map.doors.update(dt, playerOccupies);
+
+    /**
+     * Entities: behaviour, then animation, on the fixed timestep.
+     *
+     * In `update` rather than `render` on purpose. Animation driven off the render loop
+     * runs at whatever rate the display happens to refresh at — a walk cycle would be
+     * twice as fast on a 120 Hz monitor — which is the same reason door travel is here.
+     */
+    behaviourContext.seconds = dt;
+    updateEntities(map.sprites, behaviourContext, entityTiming);
 
     overlaySince += dt;
     keys.endTick();

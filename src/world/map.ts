@@ -1,5 +1,5 @@
 import { DoorAxis, DoorSystem, type Door, type DoorSpec } from './doors';
-import { SPRITE_CHARS, type SpriteEntity } from './entities';
+import { SPRITE_CHARS, makeEntity, type SpriteEntity } from './entities';
 import { SPAWN_CHARS, TILE_CHARS, Tile, isSolidTile } from './tiles';
 
 export interface Spawn {
@@ -102,7 +102,7 @@ export class GameMap {
  *   D            door (solid for now; opens in Stage 9)
  *   ^ v < >      player spawn, facing north / south / west / east
  *   @            player spawn, facing east
- *   b g l c      sprites: barrel, plant, lamp, column (the cell stays floor)
+ *   b g l c m    sprites: barrel, plant, lamp, column, monster (the cell stays floor)
  *
  * Parsing is strict and throws on anything malformed. A level that is subtly wrong —
  * a ragged row, a stray character, a hole in the outer wall — produces confusing
@@ -147,10 +147,9 @@ export function parseMap(source: string): GameMap {
 
       const spriteKind = SPRITE_CHARS[char];
       if (spriteKind !== undefined) {
-        // The sprite stands at the centre of an ordinary floor cell. Sprites do not block
-        // movement -- walking through a plant is better than a collision system that has
-        // to reason about objects as well as the grid.
-        sprites.push({ x: x + 0.5, y: y + 0.5, kind: spriteKind });
+        // The sprite stands at the centre of an ordinary floor cell. Whether it blocks
+        // movement is a property of its kind, not of the grid — see SPRITE_SIZES.
+        sprites.push(makeEntity(x + 0.5, y + 0.5, spriteKind));
         tiles[y * width + x] = Tile.Floor;
         continue;
       }

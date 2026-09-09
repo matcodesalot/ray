@@ -1,5 +1,17 @@
-import { SPRITE_SIZES } from './entities';
+import { SPRITE_SIZES, type SpriteEntity } from './entities';
 import type { GameMap } from './map';
+
+/**
+ * Passed where an entity would be, to mean "no entity blocks this move" — only the grid.
+ *
+ * Used for two different things, which is why it is a value rather than a second parameter:
+ * asking whether a position is inside a *wall* specifically, and moving a body that is
+ * already overlapping an entity.
+ */
+export const NO_ENTITIES = 'none';
+
+/** An entity a move does not collide with, or `NO_ENTITIES` for all of them. */
+export type Exempt = SpriteEntity | typeof NO_ENTITIES | undefined;
 
 /**
  * Collision against the tile grid.
@@ -46,6 +58,7 @@ export function circleHitsSolid(
   x: number,
   y: number,
   radius: number,
+  ignore?: Exempt,
 ): boolean {
   const minCellX = Math.floor(x - radius);
   const maxCellX = Math.floor(x + radius);
@@ -69,9 +82,12 @@ export function circleHitsSolid(
 
   // Blocking entities. Circle against circle: they overlap when the centres are closer
   // than the sum of the radii, which needs no square root to decide.
+  if (ignore === NO_ENTITIES) return false;
+
   const sprites = map.sprites;
   for (let i = 0; i < sprites.length; i++) {
     const sprite = sprites[i]!;
+    if (sprite === ignore) continue;
     const blocking = SPRITE_SIZES[sprite.kind].blocking;
     if (blocking <= 0) continue;
 
@@ -111,13 +127,14 @@ function maxClearFraction(
   dx: number,
   dy: number,
   radius: number,
+  ignore: Exempt,
 ): number {
   let clear = 0;
   let blocked = 1;
 
   for (let i = 0; i < BISECTION_STEPS; i++) {
     const mid = (clear + blocked) / 2;
-    if (circleHitsSolid(map, x + dx * mid, y + dy * mid, radius)) blocked = mid;
+    if (circleHitsSolid(map, x + dx * mid, y + dy * mid, radius, ignore)) blocked = mid;
     else clear = mid;
   }
 
@@ -157,6 +174,7 @@ function opposingContactNormal(
   motionX: number,
   motionY: number,
   out: Position,
+  ignore: Exempt,
 ): boolean {
   const minCellX = Math.floor(x - radius);
   const maxCellX = Math.floor(x + radius);
@@ -204,9 +222,10 @@ function opposingContactNormal(
    * collapse and the caller would be told there is nothing to slide against — the
    * welded-into-a-corner failure from Stage 8, in a new costume.
    */
-  const sprites = map.sprites;
+  const sprites = ignore === NO_ENTITIES ? EMPTY : map.sprites;
   for (let i = 0; i < sprites.length; i++) {
     const sprite = sprites[i]!;
+    if (sprite === ignore) continue;
     const blocking = SPRITE_SIZES[sprite.kind].blocking;
     if (blocking <= 0) continue;
 
@@ -258,6 +277,9 @@ const MAX_SLIDES = 3;
 /** Reused between calls so that moving allocates nothing. */
 const normal: Position = { x: 0, y: 0 };
 
+/** Stands in for the entity list when nothing is meant to block. */
+const EMPTY: readonly SpriteEntity[] = [];
+
 /**
  * How far past the radius to look when asking what we are resting against.
  *
@@ -296,6 +318,10 @@ const CONTACT_PROBE = 1e-3;
  * the good behaviour is unchanged. At a corner the normal is radial and you slide around
  * it, which axis separation simply cannot express.
  *
+ * `ignore` exists because entities move too. An entity's own blocking circle is in the same
+ * list everything else tests against, so without excluding itself it would be permanently
+ * jammed inside its own collision shape and never move at all.
+ *
  * A push aimed *exactly* at a corner is the one case with genuinely nothing to slide
  * along: the motion is entirely radial and the tangential part really is zero. It is an
  * unstable equilibrium though, and rounding breaks the tie long before you would notice,
@@ -307,19 +333,37 @@ export function slideMove(
   dx: number,
   dy: number,
   radius: number,
+  ignore?: Exempt,
 ): void {
   /**
-   * If we are somehow already inside geometry, let the move happen unchecked.
+   * If we are somehow already inside a **wall**, let the move happen unchecked.
    *
-   * Otherwise every direction is blocked and the player is stuck forever with no way out.
+   * Otherwise every direction is blocked and the body is stuck forever with no way out.
    * Reachable if a level places a spawn too close to a wall, or if someone raises
    * PLAYER_RADIUS at run time — and being able to walk out beats being trapped.
    */
-  if (circleHitsSolid(map, position.x, position.y, radius)) {
+  if (circleHitsSolid(map, position.x, position.y, radius, NO_ENTITIES)) {
     position.x += dx;
     position.y += dy;
     return;
   }
+
+  /**
+   * Being inside an *entity* is a different matter, and the distinction is load-bearing.
+   *
+   * Until Stage 14 nothing could get inside you: entities stood still, so an overlap meant
+   * a badly authored level and the escape above covered it. Now a monster walks over to
+   * where you are standing, and the overlap is routine — every couple of seconds, not once
+   * a level. Escaping by disabling collision entirely meant that standing next to a monster
+   * and a wall let you walk straight **through the wall** and out of the world.
+   *
+   * So entities stop blocking until you are clear of them, and the grid never stops. You
+   * can always walk out of something that walked into you, and you can never leave the
+   * level to do it.
+   */
+  const blockers = circleHitsSolid(map, position.x, position.y, radius, ignore)
+    ? NO_ENTITIES
+    : ignore;
 
   /**
    * Split long steps so the circle cannot jump clean over a wall.
@@ -335,7 +379,7 @@ export function slideMove(
   const stepY = dy / steps;
 
   for (let i = 0; i < steps; i++) {
-    resolveStep(map, position, stepX, stepY, radius);
+    resolveStep(map, position, stepX, stepY, radius, blockers);
   }
 }
 
@@ -346,19 +390,20 @@ function resolveStep(
   dx: number,
   dy: number,
   radius: number,
+  ignore: Exempt,
 ): void {
   for (let slide = 0; slide < MAX_SLIDES; slide++) {
     if (dx === 0 && dy === 0) return;
 
     // Nothing in the way: take the whole move.
-    if (!circleHitsSolid(map, position.x + dx, position.y + dy, radius)) {
+    if (!circleHitsSolid(map, position.x + dx, position.y + dy, radius, ignore)) {
       position.x += dx;
       position.y += dy;
       return;
     }
 
     // Blocked somewhere along the way. Advance to the contact point.
-    const clear = maxClearFraction(map, position.x, position.y, dx, dy, radius);
+    const clear = maxClearFraction(map, position.x, position.y, dx, dy, radius, ignore);
     position.x += dx * clear;
     position.y += dy * clear;
 
@@ -384,6 +429,7 @@ function resolveStep(
       remainingX,
       remainingY,
       normal,
+      ignore,
     );
 
     // Nothing here opposes the remaining motion, so there is nothing to slide along.

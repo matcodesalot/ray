@@ -15,7 +15,7 @@ import { parseMap } from '../../../src/world/map';
 import { DoorState } from '../../../src/world/doors';
 import { Player } from '../../../src/player';
 import { Tile } from '../../../src/world/tiles';
-import { SpriteKind } from '../../../src/world/entities';
+import { makeEntity, SpriteKind } from '../../../src/world/entities';
 import { LEVEL_1 } from '../../../src/world/levels/level1';
 import { TEX_SIZE } from '../../../src/config';
 
@@ -141,7 +141,7 @@ section('sprites still work (Stage 10)');
 
   const draw = (x: number, y: number) => {
     fb.clear(7);
-    renderer.draw(fb, player, [{ x, y, kind: SpriteKind.Column }], fan.hits, T, opts);
+    renderer.draw(fb, player, [makeEntity(x, y, SpriteKind.Column)], fan.hits, T, opts);
     let n = 0;
     for (const p of fb.pixels) if (p !== 7) n++;
     return n;

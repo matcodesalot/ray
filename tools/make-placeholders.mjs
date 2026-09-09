@@ -22,11 +22,14 @@
  */
 
 import { deflateSync } from 'node:zlib';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SIZE = 64;
+
+/** Stored views of a directional sprite. Five are drawn and three mirrored — see tools/import-sprites.mjs. */
+const DIRECTIONS = 8;
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'assets', 'images');
 
 // ----------------------------------------------------------------------------------------
@@ -101,17 +104,20 @@ function encodePng(width, height, rgba) {
 // ----------------------------------------------------------------------------------------
 
 class Image {
-  constructor(size) {
-    this.size = size;
-    this.data = new Uint8Array(size * size * 4);
+  constructor(width, height = width) {
+    this.width = width;
+    this.height = height;
+    /** Convenient alias for the square textures, which is most of them. */
+    this.size = width;
+    this.data = new Uint8Array(width * height * 4);
   }
 
   /** Write a pixel, blending onto whatever is there when `a` is partial. */
   set(x, y, r, g, b, a = 255) {
-    if (x < 0 || y < 0 || x >= this.size || y >= this.size) return;
+    if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     if (a <= 0) return;
 
-    const i = (y * this.size + x) * 4;
+    const i = (y * this.width + x) * 4;
 
     if (a >= 255) {
       this.data[i] = r;
@@ -135,16 +141,26 @@ class Image {
   }
 
   fill(r, g, b, a = 255) {
-    for (let y = 0; y < this.size; y++) {
-      for (let x = 0; x < this.size; x++) this.set(x, y, r, g, b, a);
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) this.set(x, y, r, g, b, a);
+    }
+  }
+
+  /** Copy another image in at an offset. Used to assemble a sheet out of cells. */
+  blit(source, originX, originY) {
+    for (let y = 0; y < source.height; y++) {
+      for (let x = 0; x < source.width; x++) {
+        const i = (y * source.width + x) * 4;
+        this.set(originX + x, originY + y, source.data[i], source.data[i + 1], source.data[i + 2], source.data[i + 3]);
+      }
     }
   }
 
   /** Fill everywhere a distance function is negative, with a soft one-pixel edge. */
   fillShape(sdf, colour) {
     const [r, g, b] = colour;
-    for (let y = 0; y < this.size; y++) {
-      for (let x = 0; x < this.size; x++) {
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
         const d = sdf(x + 0.5, y + 0.5);
         const coverage = Math.min(1, Math.max(0, 0.5 - d));
         if (coverage > 0) this.set(x, y, r, g, b, Math.round(coverage * 255));
@@ -197,6 +213,10 @@ const FONT = {
   2: ['###', '..#', '###', '#..', '###'],
   3: ['###', '..#', '###', '..#', '###'],
   4: ['#.#', '#.#', '###', '..#', '..#'],
+  0: ['###', '#.#', '#.#', '#.#', '###'],
+  5: ['###', '#..', '###', '..#', '###'],
+  6: ['###', '#..', '###', '#.#', '###'],
+  7: ['###', '..#', '..#', '..#', '..#'],
   '?': ['###', '..#', '.##', '...', '.#.'],
 };
 
@@ -290,6 +310,95 @@ function spriteTexture(image, sdf, base, tag) {
   drawLabel(image, tag, 46, shift(base, -70), 1);
 }
 
+/**
+ * One cell of the monster sheet: the creature seen from `direction`, in one pose.
+ *
+ * The point of a *directional* placeholder is that you can tell the eight views apart, so
+ * this encodes the direction three ways: the digit, which side the head leans to, and
+ * whether the muzzle is drawn in front of the body or hidden behind it.
+ *
+ * The geometry is not arbitrary. For column `d` the entity is turned `d * 45 deg` away from
+ * looking at you, so its facing vector has a screen-x component of `-sin` and a
+ * toward-the-viewer component of `cos`. Column 0 is nose-on, column 4 is its back, and
+ * columns 2 and 6 are the two flanks — the pair that a mirrored sheet swaps and nothing
+ * else notices. See `directionIndex` in `src/render/sprites.ts`.
+ */
+function monsterCell(image, direction, pose) {
+  const angle = (direction * Math.PI) / 4;
+  const across = -Math.sin(angle); // +1 means facing screen-right
+  const toward = Math.cos(angle); //  +1 means facing you
+
+  const base = [180, 96, 40];
+  const dark = shift(base, -55);
+
+  // Death frames sink and squash; walk frames bob and swing their legs.
+  const dying = pose.kind === 'death';
+  const collapse = dying ? pose.t : 0;
+  const bob = dying ? 0 : Math.sin(pose.phase * Math.PI * 2) * 1.5;
+
+  const groundY = 62;
+  const bodyH = (18 - collapse * 13) || 1;
+  const bodyY = groundY - bodyH - (dying ? 0 : 6) + bob;
+  const headR = 9 - collapse * 4;
+  const headX = 32 + across * 7;
+  const headY = bodyY - bodyH * 0.4 - headR + collapse * 16;
+
+  // Behind the body: the muzzle when it is pointing away from you, and the far leg.
+  if (toward < 0) image.fillShape(sdEllipse(headX + across * 6, headY, 5, 4), dark);
+
+  if (!dying) {
+    const swing = Math.sin(pose.phase * Math.PI * 2) * 7;
+    image.fillShape(sdBox(32 - 7 + swing, groundY - 7, 3.4, 7.3), dark);
+    image.fillShape(sdBox(32 + 7 - swing, groundY - 7, 3.4, 7.3), shift(base, -25));
+  }
+
+  image.fillShape(sdEllipse(32, bodyY, 14.3, bodyH + 0.3), base);
+  image.fillShape(sdEllipse(headX, headY, headR + 0.4, headR - 0.6), shift(base, 30));
+
+  // In front: the muzzle when it faces you at all, so column 0 reads as a face and column
+  // 4 as a back even in a still frame.
+  if (toward >= 0) image.fillShape(sdEllipse(headX + across * 6, headY + 1, 5.3, 4.2), dark);
+
+  // A spine stripe, only from behind: another cue that does not depend on the digit.
+  if (toward < 0) {
+    for (let y = Math.round(bodyY - bodyH); y < groundY - 8; y++) image.set(32, y, ...dark);
+  }
+
+  drawLabel(image, String(direction), 44, [20, 20, 20], 2);
+}
+
+/**
+ * The monster sheet: eight directions across, animation frames down.
+ *
+ * The layout is exactly what `src/assets/manifest.ts` declares — four walk rows then six
+ * death rows — so this is a drop-in replacement for the real artwork, which is what makes
+ * the repository still run for anyone who strips the third-party assets out of it.
+ */
+function monsterSheet() {
+  const walk = 4;
+  const death = 6;
+  const sheet = new Image(SIZE * DIRECTIONS, SIZE * (walk + death));
+
+  for (let row = 0; row < walk + death; row++) {
+    for (let direction = 0; direction < DIRECTIONS; direction++) {
+      const cell = new Image(SIZE);
+      const pose =
+        row < walk
+          ? { kind: 'walk', phase: row / walk }
+          : { kind: 'death', t: (row - walk + 1) / death };
+      monsterCell(cell, direction, pose);
+      sheet.blit(cell, direction * SIZE, row * SIZE);
+    }
+  }
+
+  return sheet;
+}
+
+/** Sheets, written the same way as the single textures but with their own dimensions. */
+const SHEETS = {
+  'monster.png': monsterSheet,
+};
+
 const TEXTURES = {
   'wall-1.png': (i) => tilingTexture(i, [150, 66, 60], 'WALL1', { bothAxes: false }),
   'wall-2.png': (i) => tilingTexture(i, [70, 108, 158], 'WALL2', { bothAxes: false }),
@@ -364,12 +473,46 @@ const TEXTURES = {
 
 mkdirSync(OUT_DIR, { recursive: true });
 
+/**
+ * Existing files are left alone unless `--force`.
+ *
+ * The generator used to be the only source of artwork, and overwriting was harmless. Since
+ * Stage 14 some images in that directory are real third-party art with a licence recorded
+ * in CREDITS.md, and silently replacing one with a placeholder is not a mistake you would
+ * notice until you looked at the game.
+ */
+const force = process.argv.includes('--force');
+
+let written = 0;
+let skipped = 0;
+
+function emit(name, width, height, data) {
+  const path = join(OUT_DIR, name);
+
+  if (!force && existsSync(path)) {
+    skipped++;
+    console.log(`${name.padEnd(16)} skipped — already exists`);
+    return;
+  }
+
+  const png = encodePng(width, height, data);
+  writeFileSync(path, png);
+  written++;
+  console.log(`${name.padEnd(16)} ${String(png.length).padStart(6)} bytes  ${width}x${height}`);
+}
+
 for (const [name, paint] of Object.entries(TEXTURES)) {
   const image = new Image(SIZE);
   paint(image);
-  const png = encodePng(SIZE, SIZE, image.data);
-  writeFileSync(join(OUT_DIR, name), png);
-  console.log(`${name.padEnd(16)} ${String(png.length).padStart(5)} bytes`);
+  emit(name, SIZE, SIZE, image.data);
 }
 
-console.log(`\n${Object.keys(TEXTURES).length} placeholders written to src/assets/images/`);
+for (const [name, build] of Object.entries(SHEETS)) {
+  const sheet = build();
+  emit(name, sheet.width, sheet.height, sheet.data);
+}
+
+console.log(
+  `\n${written} written to src/assets/images/` +
+    (skipped ? `, ${skipped} left alone (pass --force to overwrite)` : ''),
+);

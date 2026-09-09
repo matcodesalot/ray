@@ -15,9 +15,24 @@ export interface Texture {
   readonly data: Uint32Array;
 }
 
+/**
+ * A sprite drawn from a sheet: cells addressed by direction and animation frame.
+ *
+ * `cells[row * columns + direction]`. Columns are the eight viewing directions, rows are
+ * animation frames, and an animation is a contiguous run of rows.
+ */
+export interface SpriteSheet {
+  readonly columns: number;
+  readonly rows: number;
+  readonly cells: readonly Texture[];
+  readonly animations: Readonly<Record<string, { firstRow: number; frames: number; frameSeconds: number; loop: boolean }>>;
+}
+
 export interface TextureSet {
   readonly walls: Readonly<Record<number, Texture>>;
   readonly sprites: Readonly<Record<number, Texture>>;
+  /** Sheets for kinds that animate or face; kinds drawn from a single image are absent. */
+  readonly spriteSheets: Readonly<Record<number, SpriteSheet>>;
   readonly doorFrame: Texture;
   readonly floor: Texture;
   readonly ceiling: Texture;
@@ -33,6 +48,38 @@ export function wallTexture(set: TextureSet, tile: number): Texture {
 /** The texture for a sprite kind, falling back to the missing-texture pattern. */
 export function spriteTexture(set: TextureSet, kind: number): Texture {
   return set.sprites[kind] ?? set.missing;
+}
+
+/** How long an animation runs, for whoever is advancing the clock. */
+export function animationTiming(
+  set: TextureSet,
+  kind: number,
+  animation: string,
+): { frames: number; frameSeconds: number; loop: boolean } | undefined {
+  return set.spriteSheets[kind]?.animations[animation];
+}
+
+/**
+ * The cell to draw for an entity: the right animation frame, seen from the right side.
+ *
+ * `direction` is 0 for "facing the viewer" and counts round in eighths. Returns undefined
+ * for kinds with no sheet, which is the signal to fall back to the single image.
+ */
+export function spriteCell(
+  set: TextureSet,
+  kind: number,
+  animation: string,
+  frame: number,
+  direction: number,
+): Texture | undefined {
+  const sheet = set.spriteSheets[kind];
+  if (!sheet) return undefined;
+
+  const spec = sheet.animations[animation];
+  if (!spec) return set.missing;
+
+  const row = spec.firstRow + Math.min(frame, spec.frames - 1);
+  return sheet.cells[row * sheet.columns + (direction & (sheet.columns - 1))] ?? set.missing;
 }
 
 /**
@@ -77,11 +124,64 @@ export function textureFromPixels(
     );
   }
 
+  return extractCell(pixels, width, 0, 0);
+}
+
+/**
+ * Slice a sprite sheet into one texture per cell, row-major.
+ *
+ * A sheet is a grid of `TEX_SIZE` cells: columns are viewing directions, rows are animation
+ * frames. Cell (column, row) ends up at `cells[row * columns + column]`, which is the order
+ * the renderer indexes with.
+ *
+ * The sheet must divide evenly. A sheet that is a few pixels off would otherwise slice with
+ * a creeping offset — every cell slightly more wrong than the last — which looks like an
+ * animation that drifts rather than like a loading error, and is miserable to trace back.
+ */
+export function sheetFromPixels(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  label: string,
+): { columns: number; rows: number; cells: Texture[] } {
+  if (width % TEX_SIZE !== 0 || height % TEX_SIZE !== 0) {
+    throw new Error(
+      `${label}: a sprite sheet must divide evenly into ${TEX_SIZE}x${TEX_SIZE} cells, ` +
+        `but it is ${width}x${height}.`,
+    );
+  }
+
+  const columns = width / TEX_SIZE;
+  const rows = height / TEX_SIZE;
+  const cells: Texture[] = [];
+
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      cells.push(extractCell(pixels, width, column * TEX_SIZE, row * TEX_SIZE));
+    }
+  }
+
+  return { columns, rows, cells };
+}
+
+/**
+ * Copy one `TEX_SIZE` cell out of a decoded image, transposing and normalising alpha.
+ *
+ * `sourceWidth` is the *image's* width, not the cell's — the row stride of the source is
+ * what makes a sub-rectangle copy differ from a whole-image one, and getting that wrong is
+ * how you end up slicing diagonally across a sheet.
+ */
+function extractCell(
+  pixels: Uint8ClampedArray,
+  sourceWidth: number,
+  originX: number,
+  originY: number,
+): Texture {
   const data = new Uint32Array(TEX_SIZE * TEX_SIZE);
 
   for (let y = 0; y < TEX_SIZE; y++) {
     for (let x = 0; x < TEX_SIZE; x++) {
-      const source = (y * TEX_SIZE + x) * 4;
+      const source = ((originY + y) * sourceWidth + (originX + x)) * 4;
       const alpha = pixels[source + 3]!;
 
       data[x * TEX_SIZE + y] =

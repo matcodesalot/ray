@@ -17,7 +17,9 @@ lib/harness.ts        check/near helpers, the DOM stub, synthetic textures
 node/decode.ts        image pixels -> Texture: transpose, alpha, size validation, seams
 node/sprite-alpha.ts  sprite compositing maths
 node/renderer.ts      cross-stage regressions: wallX, doors, sprites, orientation, whole frames
-browser/images.mjs    the placeholder PNGs decode and tile correctly
+node/collision.ts     circle-vs-grid and circle-vs-entity: contacts, sliding, corners
+node/sprites.ts       sheet slicing, direction selection, animation timing, the behaviour hook
+browser/images.mjs    the PNGs decode and tile correctly; sheets divide into cells
 browser/loader.mjs    fetch + decode + canvas readback, end to end
 ```
 
@@ -39,10 +41,19 @@ to add more:
   read back out of the rendered image.
 - **The alpha-ordering check** (`node/sprite-alpha.ts`) asserts that the two possible
   orderings *differ*, so it would actually fail if the code read alpha after shading.
+- **The direction checks** (`node/sprites.ts`) assert that the *opposite* sign convention
+  agrees on front and back and disagrees on both flanks. Front and back pass under either
+  convention, so a check of those alone would be blind to a mirrored sheet — the same class
+  of bug as the mirrored walls, in a new costume.
 
 The pattern: assert what should have happened, not merely that something happened. Several
 real bugs in this project — corners that silently stopped the player, sprites drawn at the
 wrong place off-axis — passed every invariant that only asked "is the state still valid?".
+
+A corollary worth remembering: when a new check fails, suspect the check first. The Stage 13
+sweep reported all 180 approaches frozen because every one of them was aimed at the barrel's
+dead centre, and the Stage 14 render check reported the renderer four cells out because it
+placed every viewer on the wrong side of the monster. Both times the engine was right.
 
 ## Adding a check
 
